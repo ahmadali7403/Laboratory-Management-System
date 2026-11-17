@@ -1,0 +1,172 @@
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+}
+
+enum BranchStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum PlatformAdminRole {
+  SUPER_ADMIN
+  SUPPORT_ADMIN
+}
+
+model PlatformAdmin {
+  id          String            @id @default(uuid()) @db.Uuid
+  name        String
+  email       String            @unique
+  password    String
+  role        PlatformAdminRole @default(SUPER_ADMIN)
+  isActive    Boolean           @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model Organization {
+  id        String             @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String             @unique
+  code      String             @unique
+  email     String?
+  phone     String?
+  address   String?
+  city      String?
+  country   String             @default("Pakistan")
+  status    OrganizationStatus @default(ACTIVE)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  branches Branch[]
+  users    User[]
+  roles    Role[]
+}
+
+model Branch {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  name           String
+  code           String
+  email          String?
+  phone          String?
+  address        String?
+  city           String?
+  status         BranchStatus @default(ACTIVE)
+  isHeadOffice   Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberships  BranchMembership[]
+
+  @@unique([organizationId, code])
+  @@unique([id, organizationId])
+  @@index([organizationId, status])
+}
+
+model User {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @db.Uuid
+  name           String
+  email          String
+  password       String
+  phone          String?
+  status         UserStatus @default(ACTIVE)
+  lastLoginAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  memberships  BranchMembership[]
+  userRoles    UserRole[]
+
+  @@unique([organizationId, email])
+  @@unique([id, organizationId])
+  @@index([organizationId, status])
+}
+
+model BranchMembership {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  userId         String   @db.Uuid
+  branchId       String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  user   User   @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@unique([userId, branchId])
+  @@index([organizationId, branchId])
+}
+
+model Role {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  description    String?
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userRoles    UserRole[]
+  permissions  RolePermission[]
+
+  @@unique([organizationId, name])
+  @@unique([id, organizationId])
+}
+
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+
+  roles RolePermission[]
+}
+
+model UserRole {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  userId         String   @db.Uuid
+  roleId         String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  user User @relation(fields: [userId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  role Role @relation(fields: [roleId, organizationId], references: [id, organizationId], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([organizationId])
+}
+
+model RolePermission {
+  id           String @id @default(uuid()) @db.Uuid
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+}
