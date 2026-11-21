@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getAdminSession } from "@/lib/auth";
+import { isUuid } from "@/lib/http";
 
 const updateSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
@@ -36,6 +37,10 @@ export async function PATCH(request, { params }) {
     }
 
     const { id } = await params;
+
+    if (!isUuid(id)) {
+      return NextResponse.json({ message: "Invalid organization ID." }, { status: 400 });
+    }
 
     const parsed = updateSchema.safeParse(await request.json());
 
@@ -110,6 +115,10 @@ export async function DELETE(request, { params }) {
     }
 
     const { id } = await params;
+
+    if (!isUuid(id)) {
+      return NextResponse.json({ message: "Invalid organization ID." }, { status: 400 });
+    }
 
     const organization = await prisma.organization.findUnique({
       where: { id },

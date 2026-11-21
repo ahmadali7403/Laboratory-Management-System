@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
 
 import { prisma } from "@/lib/prisma";
-import { getAdminSession } from "@/lib/auth";
+import { canManageOrganizationBranches } from "@/lib/auth";
+import { tryEncryptPassword } from "@/lib/credentials-encryption";
 
 const branchSchema = z.object({
   name: z.string().trim().min(2, "Branch name is required."),
@@ -10,6 +12,8 @@ const branchSchema = z.object({
     .string()
     .trim()
     .min(2, "Branch code is required.")
+    .max(24)
+    .regex(/^[A-Za-z0-9_-]+$/)
     .transform((value) => value.toUpperCase()),
   email: z
     .string()
@@ -17,10 +21,17 @@ const branchSchema = z.object({
     .email("Invalid email address.")
     .or(z.literal(""))
     .optional(),
-  phone: z.string().trim().optional(),
-  address: z.string().trim().optional(),
-  city: z.string().trim().optional(),
+  phone: z.string().trim().max(30).optional(),
+  address: z.string().trim().max(300).optional(),
+  city: z.string().trim().max(100).optional(),
   isHeadOffice: z.boolean().default(false),
+  username: z
+    .string()
+    .trim()
+    .min(3)
+    .max(40)
+    .regex(/^[a-zA-Z0-9._-]+$/),
+  password: z.string().min(8).max(100),
 });
 
 const uuidRegex =
@@ -29,12 +40,6 @@ const uuidRegex =
 // GET: Organization ki branches
 export async function GET(request, { params }) {
   try {
-    const admin = await getAdminSession();
-
-    if (!admin) {
-      return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
-    }
-
     const { id: organizationId } = await params;
 
     if (!uuidRegex.test(organizationId)) {
@@ -44,9 +49,17 @@ export async function GET(request, { params }) {
       );
     }
 
+    if (!(await canManageOrganizationBranches(organizationId))) {
+      return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+    }
+
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, name: true, status: true },
+      select: {
+        id: true,
+        name: true,
+        status: true,
+      },
     });
 
     if (!organization) {
@@ -60,7 +73,9 @@ export async function GET(request, { params }) {
       where: { organizationId },
       include: {
         _count: {
-          select: { memberships: true },
+          select: {
+            memberships: true,
+          },
         },
       },
       orderBy: [{ isHeadOffice: "desc" }, { createdAt: "desc" }],
@@ -80,15 +95,9 @@ export async function GET(request, { params }) {
   }
 }
 
-// POST: New branch create
+// POST: New branch + Branch Admin account create
 export async function POST(request, { params }) {
   try {
-    const admin = await getAdminSession();
-
-    if (!admin) {
-      return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
-    }
-
     const { id: organizationId } = await params;
 
     if (!uuidRegex.test(organizationId)) {
@@ -98,9 +107,16 @@ export async function POST(request, { params }) {
       );
     }
 
+    if (!(await canManageOrganizationBranches(organizationId))) {
+      return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
+    }
+
     const organization = await prisma.organization.findUnique({
       where: { id: organizationId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+      },
     });
 
     if (!organization) {
@@ -120,8 +136,7 @@ export async function POST(request, { params }) {
       );
     }
 
-    const body = await request.json();
-    const parsed = branchSchema.safeParse(body);
+    const parsed = branchSchema.safeParse(await request.json());
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -134,43 +149,127 @@ export async function POST(request, { params }) {
     }
 
     const data = parsed.data;
+    const username = data.username.toLowerCase();
 
-    const branchData = {
-      organizationId,
-      name: data.name,
-      code: data.code,
-      email: data.email || null,
-      phone: data.phone?.trim() || null,
-      address: data.address?.trim() || null,
-      city: data.city?.trim() || null,
-      isHeadOffice: data.isHeadOffice,
-    };
+    const passwordHash = await bcrypt.hash(data.password, 12);
 
-    const branch = await prisma.$transaction(async (tx) => {
-      // Organization mein sirf ek head office hoga.
-      if (data.isHeadOffice) {
-        await tx.branch.updateMany({
-          where: { organizationId, isHeadOffice: true },
-          data: { isHeadOffice: false },
+    const result = await prisma.$transaction(
+      async (tx) => {
+        // Agar new branch head office hai to purana head office remove karo.
+        if (data.isHeadOffice) {
+          await tx.branch.updateMany({
+            where: {
+              organizationId,
+              isHeadOffice: true,
+            },
+            data: {
+              isHeadOffice: false,
+            },
+          });
+        }
+
+        // Branch create
+        const branch = await tx.branch.create({
+          data: {
+            organizationId,
+            name: data.name,
+            code: data.code,
+            email: data.email || null,
+            phone: data.phone?.trim() || null,
+            address: data.address?.trim() || null,
+            city: data.city?.trim() || null,
+            isHeadOffice: data.isHeadOffice,
+          },
         });
-      }
 
-      return tx.branch.create({
-        data: branchData,
-      });
-    });
+        // Organization ka Branch Admin role
+        const role = await tx.role.upsert({
+          where: {
+            organizationId_name: {
+              organizationId,
+              name: "BRANCH_ADMIN",
+            },
+          },
+          update: {},
+          create: {
+            organizationId,
+            name: "BRANCH_ADMIN",
+            description: "Access limited to assigned branch.",
+            isSystem: true,
+          },
+        });
+
+        // Branch Admin user create
+        const user = await tx.user.create({
+          data: {
+            name: `${branch.name} Admin`,
+            username,
+            email: `${username}@accounts.labos.local`,
+            password: passwordHash,
+            passwordEncrypted: tryEncryptPassword(data.password),
+            organization: {
+              connect: {
+                id: organizationId,
+              },
+            },
+          },
+          select: {
+            id: true,
+            username: true,
+            status: true,
+          },
+        });
+
+        // User ko branch ke saath assign karo
+        await tx.branchMembership.create({
+          data: {
+            organizationId,
+            userId: user.id,
+            branchId: branch.id,
+          },
+        });
+
+        // User ko Branch Admin role assign karo
+        await tx.userRole.create({
+          data: {
+            organizationId,
+            userId: user.id,
+            roleId: role.id,
+          },
+        });
+
+        return {
+          ...branch,
+          account: user,
+        };
+      },
+      {
+        maxWait: 10000,
+        timeout: 30000,
+      },
+    );
 
     return NextResponse.json(
       {
-        message: "Branch created successfully.",
-        branch,
+        message: "Branch aur Branch Admin account successfully create ho gaye.",
+        branch: result,
       },
       { status: 201 },
     );
   } catch (error) {
-    if (error.code === "P2002") {
+    if (error?.code === "P2002") {
+      const target = error.meta?.target;
+
+      const isUsernameConflict = Array.isArray(target)
+        ? target.includes("username")
+        : String(target || "").includes("username");
+
       return NextResponse.json(
-        { message: "This branch code already exists in this organization." },
+        {
+          message: isUsernameConflict
+            ? "Yeh username pehle se use ho raha hai."
+            : "This branch code already exists in this organization.",
+        },
         { status: 409 },
       );
     }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getAdminSession } from "@/lib/auth";
+import { canManageOrganizationBranches } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const uuidRegex =
@@ -43,12 +43,11 @@ async function authorizeAndFindBranch(organizationId, branchId) {
 
 export async function PATCH(request, { params }) {
   try {
-    const admin = await getAdminSession();
-    if (!admin) {
+    const { id: organizationId, branchId } = await params;
+    if (!(await canManageOrganizationBranches(organizationId))) {
       return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
     }
 
-    const { id: organizationId, branchId } = await params;
     const result = await authorizeAndFindBranch(organizationId, branchId);
     if (result.error) return result.error;
 
@@ -98,12 +97,11 @@ export async function PATCH(request, { params }) {
 
 export async function DELETE(request, { params }) {
   try {
-    const admin = await getAdminSession();
-    if (!admin) {
+    const { id: organizationId, branchId } = await params;
+    if (!(await canManageOrganizationBranches(organizationId))) {
       return NextResponse.json({ message: "Unauthorized." }, { status: 401 });
     }
 
-    const { id: organizationId, branchId } = await params;
     const result = await authorizeAndFindBranch(organizationId, branchId);
     if (result.error) return result.error;
 

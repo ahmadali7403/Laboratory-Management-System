@@ -82,3 +82,92 @@ export async function destroyAdminSession() {
     maxAge: 0,
   });
 }
+
+const USER_COOKIE_NAME = "labos_user_session";
+
+export async function createUserSession(user, roleName, branchId = null) {
+  const token = await new SignJWT({
+    userId: user.id,
+    organizationId: user.organizationId,
+    branchId,
+    role: roleName,
+    username: user.username,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${SESSION_DURATION}s`)
+    .sign(getSecretKey());
+
+  const cookieStore = await cookies();
+  cookieStore.set(USER_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_DURATION,
+  });
+}
+
+export async function getUserSession() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(USER_COOKIE_NAME)?.value;
+  if (!token) return null;
+
+  try {
+    const { payload } = await jwtVerify(token, getSecretKey());
+    if (!payload.userId || !payload.organizationId || !payload.role) return null;
+
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: {
+        id: true,
+        name: true,
+        username: true,
+        organizationId: true,
+        status: true,
+        organization: { select: { status: true } },
+        memberships: { select: { branchId: true, branch: { select: { status: true } } } },
+        userRoles: { select: { role: { select: { name: true } } } },
+      },
+    });
+
+    if (!user || user.status !== "ACTIVE" || user.organizationId !== payload.organizationId || user.organization.status !== "ACTIVE") return null;
+
+    const roleNames = user.userRoles.map((item) => item.role.name);
+    if (!roleNames.includes(payload.role)) return null;
+
+    if (payload.role === "BRANCH_ADMIN") {
+      const membership = user.memberships.find((item) => item.branchId === payload.branchId && item.branch.status === "ACTIVE");
+      if (!membership) return null;
+    }
+
+    return {
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      organizationId: user.organizationId,
+      branchId: payload.branchId || null,
+      role: payload.role,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function destroyUserSession() {
+  const cookieStore = await cookies();
+  cookieStore.set(USER_COOKIE_NAME, "", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 0,
+  });
+}
+
+export async function canManageOrganizationBranches(organizationId) {
+  const admin = await getAdminSession();
+  if (admin) return true;
+  const user = await getUserSession();
+  return Boolean(user && user.role === "ORGANIZATION_ADMIN" && user.organizationId === organizationId);
+}

@@ -21,11 +21,11 @@ export default function LoginPage() {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ identifier: email, password }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Login failed.");
-      router.replace("/dashboard");
+      router.replace(data.redirectTo || "/dashboard");
       router.refresh();
     } catch (err) {
       setError(err.message || "Login process mein error aa gaya.");
@@ -60,15 +60,15 @@ export default function LoginPage() {
             <div className="mb-8">
               <p className="text-sm font-semibold text-blue-600">WELCOME BACK</p>
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Sign in to LabOS</h2>
-              <p className="mt-2 text-sm text-slate-500">Enter your Super Admin credentials to continue.</p>
+              <p className="mt-2 text-sm text-slate-500">Sign in with your Super Admin email or organization/branch username.</p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-5">
               <label className="block">
-                <span className="mb-2 block text-sm font-medium text-slate-700">Email address</span>
+                <span className="mb-2 block text-sm font-medium text-slate-700">Username or email</span>
                 <span className="relative block">
                   <Mail size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input type="email" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@example.com" className="h-12 w-full rounded-xl border border-slate-200 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
+                  <input type="text" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@example.com or lab_username" className="h-12 w-full rounded-xl border border-slate-200 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
                 </span>
               </label>
 
@@ -86,7 +86,7 @@ export default function LoginPage() {
               <button type="submit" disabled={loading} className="flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">{loading ? "Signing in..." : "Sign in securely"}</button>
             </form>
 
-            <div className="mt-8 flex items-center justify-center gap-2 text-xs text-slate-400"><ShieldCheck size={14} /> Protected Super Admin access</div>
+            <div className="mt-8 flex items-center justify-center gap-2 text-xs text-slate-400"><ShieldCheck size={14} /> Secure access for Super Admin, Organizations and Branches</div>
           </div>
         </section>
       </div>

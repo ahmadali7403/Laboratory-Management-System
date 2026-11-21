@@ -60,6 +60,18 @@ model Organization {
   branches Branch[]
   users    User[]
   roles    Role[]
+
+  patients       Patient[]
+  doctors        Doctor[]
+  tests          Test[]
+  orders         LabOrder[]
+  payments       Payment[]
+  expenses       Expense[]
+  suppliers      Supplier[]
+  inventoryItems InventoryItem[]
+  purchases      Purchase[]
+  notifications  Notification[]
+  sequences      Sequence[]
 }
 
 model Branch {
@@ -79,22 +91,35 @@ model Branch {
   organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   memberships  BranchMembership[]
 
+  patients       Patient[]
+  doctors        Doctor[]
+  tests          Test[]
+  orders         LabOrder[]
+  payments       Payment[]
+  expenses       Expense[]
+  suppliers      Supplier[]
+  inventoryItems InventoryItem[]
+  purchases      Purchase[]
+  notifications  Notification[]
+
   @@unique([organizationId, code])
   @@unique([id, organizationId])
   @@index([organizationId, status])
 }
 
 model User {
-  id             String     @id @default(uuid()) @db.Uuid
-  organizationId String     @db.Uuid
-  name           String
-  email          String
-  password       String
-  phone          String?
-  status         UserStatus @default(ACTIVE)
-  lastLoginAt    DateTime?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id                 String     @id @default(uuid()) @db.Uuid
+  organizationId     String     @db.Uuid
+  name               String
+  email              String
+  username           String?    @unique
+  password           String
+  passwordEncrypted  String?
+  phone              String?
+  status             UserStatus @default(ACTIVE)
+  lastLoginAt        DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
 
   organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   memberships  BranchMembership[]
@@ -169,4 +194,377 @@ model RolePermission {
   permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([roleId, permissionId])
+}
+
+// ---------------------------------------------------------------------------
+// LABORATORY DOMAIN
+// Tenant rule: every row carries organizationId; branch-owned rows also carry
+// branchId. Composite foreign keys (id, organizationId) make it impossible at
+// database level to link a row to a branch/patient/test of another organization.
+// ---------------------------------------------------------------------------
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum OrderStatus {
+  REGISTERED
+  SAMPLE_COLLECTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum SampleStatus {
+  PENDING
+  COLLECTED
+  RECEIVED
+  REJECTED
+}
+
+enum ResultStatus {
+  PENDING
+  ENTERED
+  VERIFIED
+}
+
+enum ResultFlag {
+  NORMAL
+  LOW
+  HIGH
+  CRITICAL
+  ABNORMAL
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  ONLINE
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum PurchaseStatus {
+  ORDERED
+  RECEIVED
+  CANCELLED
+}
+
+model PlatformSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model Sequence {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  key            String
+  value          Int    @default(0)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+}
+
+model Patient {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  branchId       String    @db.Uuid
+  mrn            String
+  name           String
+  gender         Gender    @default(OTHER)
+  dateOfBirth    DateTime? @db.Date
+  phone          String?
+  email          String?
+  cnic           String?
+  address        String?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch       @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  orders       LabOrder[]
+
+  @@unique([organizationId, mrn])
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, createdAt])
+  @@index([branchId, name])
+  @@index([branchId, phone])
+}
+
+model Doctor {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String?  @db.Uuid
+  name           String
+  specialization String?
+  phone          String?
+  email          String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  orders       LabOrder[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, isActive])
+}
+
+model Test {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  branchId        String?  @db.Uuid
+  code            String
+  name            String
+  category        String?
+  sampleType      String   @default("Blood")
+  price           Decimal  @db.Decimal(12, 2)
+  unit            String?
+  refLow          Decimal? @db.Decimal(12, 4)
+  refHigh         Decimal? @db.Decimal(12, 4)
+  refRangeText    String?
+  turnaroundHours Int?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch?         @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  orderItems   LabOrderItem[]
+
+  @@unique([organizationId, code])
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, isActive])
+  @@index([organizationId, name])
+}
+
+model LabOrder {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @db.Uuid
+  branchId       String      @db.Uuid
+  orderNo        String
+  patientId      String      @db.Uuid
+  doctorId       String?     @db.Uuid
+  status         OrderStatus @default(REGISTERED)
+  paymentStatus  PaymentStatus @default(UNPAID)
+  subtotal       Decimal     @db.Decimal(12, 2)
+  discount       Decimal     @default(0) @db.Decimal(12, 2)
+  total          Decimal     @db.Decimal(12, 2)
+  paidAmount     Decimal     @default(0) @db.Decimal(12, 2)
+  notes          String?
+  createdByName  String
+  completedAt    DateTime?
+  cancelledAt    DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch         @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  patient      Patient        @relation(fields: [patientId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  doctor       Doctor?        @relation(fields: [doctorId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  items        LabOrderItem[]
+  samples      Sample[]
+  payments     Payment[]
+
+  @@unique([organizationId, orderNo])
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, createdAt])
+  @@index([branchId, status])
+  @@index([branchId, paymentStatus])
+  @@index([patientId])
+}
+
+model Sample {
+  id              String       @id @default(uuid()) @db.Uuid
+  orderId         String       @db.Uuid
+  sampleNo        String
+  sampleType      String
+  status          SampleStatus @default(PENDING)
+  collectedAt     DateTime?
+  collectedByName String?
+  rejectionReason String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  order LabOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  items LabOrderItem[]
+
+  @@unique([orderId, sampleType])
+  @@index([status])
+}
+
+model LabOrderItem {
+  id             String       @id @default(uuid()) @db.Uuid
+  orderId        String       @db.Uuid
+  testId         String       @db.Uuid
+  sampleId       String?      @db.Uuid
+  testName       String
+  testCode       String
+  price          Decimal      @db.Decimal(12, 2)
+  resultValue    String?
+  unit           String?
+  refRange       String?
+  flag           ResultFlag   @default(NORMAL)
+  resultStatus   ResultStatus @default(PENDING)
+  comments       String?
+  enteredByName  String?
+  enteredAt      DateTime?
+  verifiedByName String?
+  verifiedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  order  LabOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  test   Test     @relation(fields: [testId], references: [id], onDelete: Restrict)
+  sample Sample?  @relation(fields: [sampleId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([resultStatus])
+  @@index([testId])
+}
+
+model Payment {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  branchId       String        @db.Uuid
+  orderId        String        @db.Uuid
+  amount         Decimal       @db.Decimal(12, 2)
+  method         PaymentMethod @default(CASH)
+  reference      String?
+  receivedByName String
+  createdAt      DateTime      @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch       @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  order        LabOrder     @relation(fields: [orderId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, branchId, createdAt])
+  @@index([orderId])
+}
+
+model Expense {
+  id            String   @id @default(uuid()) @db.Uuid
+  organizationId String  @db.Uuid
+  branchId      String   @db.Uuid
+  category      String
+  description   String?
+  amount        Decimal  @db.Decimal(12, 2)
+  expenseDate   DateTime @db.Date
+  createdByName String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch       @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, branchId, expenseDate])
+}
+
+model Supplier {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String?  @db.Uuid
+  name           String
+  contactPerson  String?
+  phone          String?
+  email          String?
+  address        String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  purchases    Purchase[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, isActive])
+}
+
+model InventoryItem {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String   @db.Uuid
+  name           String
+  sku            String?
+  unit           String   @default("pcs")
+  quantity       Decimal  @default(0) @db.Decimal(12, 2)
+  reorderLevel   Decimal  @default(0) @db.Decimal(12, 2)
+  unitCost       Decimal? @db.Decimal(12, 2)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch        Branch         @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  purchaseItems PurchaseItem[]
+
+  @@unique([branchId, name])
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, isActive])
+}
+
+model Purchase {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  branchId       String         @db.Uuid
+  purchaseNo     String
+  supplierId     String         @db.Uuid
+  status         PurchaseStatus @default(ORDERED)
+  total          Decimal        @db.Decimal(12, 2)
+  purchaseDate   DateTime       @db.Date
+  notes          String?
+  receivedAt     DateTime?
+  createdByName  String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch         @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  supplier     Supplier       @relation(fields: [supplierId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  items        PurchaseItem[]
+
+  @@unique([organizationId, purchaseNo])
+  @@index([organizationId, branchId, purchaseDate])
+}
+
+model PurchaseItem {
+  id              String  @id @default(uuid()) @db.Uuid
+  purchaseId      String  @db.Uuid
+  inventoryItemId String  @db.Uuid
+  quantity        Decimal @db.Decimal(12, 2)
+  unitCost        Decimal @db.Decimal(12, 2)
+
+  purchase      Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  inventoryItem InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseId])
+}
+
+model Notification {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String?  @db.Uuid
+  type           String
+  title          String
+  message        String
+  link           String?
+  isRead         Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, branchId, isRead, createdAt])
 }
