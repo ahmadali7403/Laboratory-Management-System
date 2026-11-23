@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "admin:create": "node scripts/create-super-admin.mjs",
-    "db:seed:demo": "node scripts/seed-demo.mjs"
+    "db:seed:demo": "node scripts/seed-demo.mjs",
+    "db:seed:tests": "node scripts/seed-common-tests.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

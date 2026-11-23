@@ -37,6 +37,7 @@ export async function GET(request) {
         include: {
           order: { select: { id: true, orderNo: true, branch: { select: { name: true } }, patient: { select: { name: true, mrn: true, gender: true, dateOfBirth: true } } } },
           test: { select: { refLow: true, refHigh: true, refRangeText: true, unit: true } },
+          results: { orderBy: { sortOrder: "asc" } },
         },
       }),
       prisma.labOrderItem.count({ where }),

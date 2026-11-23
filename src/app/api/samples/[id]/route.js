@@ -50,6 +50,7 @@ export async function PATCH(request, { params }) {
           where: { sampleId: id, resultStatus: { not: "PENDING" } },
           data: { resultStatus: "PENDING", resultValue: null, verifiedAt: null, verifiedByName: null, enteredAt: null, enteredByName: null },
         });
+        await tx.labResult.updateMany({ where: { orderItem: { sampleId: id } }, data: { value: null, flag: "NORMAL" } });
       }
       await recomputeOrderStatus(tx, sample.order.id);
       if (action === "reject") {

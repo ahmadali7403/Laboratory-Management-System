@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { getAdminSession } from "@/lib/auth";
 import { tryEncryptPassword } from "@/lib/credentials-encryption";
+import { seedDefaultTests } from "@/lib/test-defaults";
 
 const createSchema = z.object({
   name: z
@@ -180,6 +181,9 @@ export async function POST(request) {
             country: data.country || "Pakistan",
           },
         });
+
+        // 1b. Starter panels (CBC, LFT, RFT, Electrolytes)
+        await seedDefaultTests(tx, created.id);
 
         // 2. Create organization admin role
         const role = await tx.role.create({

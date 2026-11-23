@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/client";
+import DataMenu from "@/components/data-tools";
+import ParametersEditor from "@/components/parameters-editor";
 import { Button, EmptyState, ErrorState, Field, FormError, Modal, PageHeader, Pagination, Spinner, inputClass, useConfirm, useDebounced, useToast } from "@/components/ui";
 
 /**
@@ -64,6 +66,7 @@ export default function DataModule({ config, scope }) {
     <>
       <Button variant="secondary" onClick={refresh} aria-label="Refresh"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /></Button>
       {config.headerActions?.(ctx)}
+      <DataMenu config={config} scope={scope} params={{ ...(config.baseParams || {}), ...(dq ? { q: dq } : {}), ...Object.fromEntries(Object.entries(filters).filter(([, v]) => v)) }} onRestored={refresh} />
       {config.form && (!config.canCreate || config.canCreate(scope)) && (
         <Button onClick={() => setForm({ mode: "create" })}><Plus size={16} /> {config.createLabel || `Add ${config.singular}`}</Button>
       )}
@@ -163,7 +166,7 @@ function initialValues(config, scope, mode, row) {
     if (mode === "edit" && row) {
       v[f.name] = f.init ? f.init(row) : f.type === "date" ? (row[f.name] ? String(row[f.name]).slice(0, 10) : "") : f.type === "checkbox" ? Boolean(row[f.name]) : row[f.name] ?? "";
     } else {
-      v[f.name] = f.default !== undefined ? f.default : f.type === "checkbox" ? false : "";
+      v[f.name] = f.default !== undefined ? f.default : f.type === "checkbox" ? false : f.type === "params" ? [] : "";
     }
   }
   return v;
@@ -174,7 +177,7 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
   const [values, setValues] = useState(() => initialValues(config, scope, mode, row));
   const branchMode = config.form.branch; // 'required' | 'optional' | undefined
   const showBranch = mode === "create" && branchMode && scope.role !== "BRANCH_ADMIN" && (branchMode === "optional" || !scope.branchId);
-  const [branchId, setBranchId] = useState(branchMode === "optional" ? scope.branchId || "" : scope.branchId || "");
+  const [branchId, setBranchId] = useState(branchMode === "optional" ? "" : scope.branchId || "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const set = (name, value) => setValues((s) => ({ ...s, [name]: value }));
@@ -215,7 +218,7 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
             </Field>
           )}
           {config.form.fields.filter((f) => !(mode === "edit" && f.createOnly) && !(mode === "create" && f.editOnly) && (!f.show || f.show(values))).map((f) => (
-            <Field key={f.name} label={f.label} required={f.required} hint={f.hint} className={f.type === "textarea" || f.wide ? "sm:col-span-2" : ""}>
+            f.type === "params" ? <ParametersEditor key={f.name} label={f.label} value={values[f.name]} onChange={(v) => set(f.name, v)} /> : <Field key={f.name} label={f.label} required={f.required} hint={f.hint} className={f.type === "textarea" || f.wide ? "sm:col-span-2" : ""}>
               {f.type === "select" ? (
                 <select value={values[f.name]} onChange={(e) => set(f.name, e.target.value)} required={f.required} className={inputClass}>
                   {!f.required && <option value="">—</option>}

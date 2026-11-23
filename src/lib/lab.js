@@ -46,9 +46,17 @@ export async function recomputeOrderStatus(tx, orderId) {
 }
 
 /** Auto flag for numeric results using the test's reference limits. */
+const QUALITATIVE = /^(negative|non[- ]?reactive|nil|absent|not seen|not detected|normal)$/i;
+
 export function computeFlag(value, test, fallback = "NORMAL") {
-  const n = Number(String(value).replace(/,/g, "").trim());
-  if (!Number.isFinite(n) || String(value).trim() === "") return fallback;
+  const text = String(value).trim();
+  const n = Number(text.replace(/,/g, ""));
+  if (!Number.isFinite(n) || text === "") {
+    // Qualitative parameter (e.g. expected "Negative"): anything else is abnormal.
+    const expected = test.refRangeText?.trim();
+    if (text && expected && QUALITATIVE.test(expected) && text.toLowerCase() !== expected.toLowerCase()) return "ABNORMAL";
+    return fallback;
+  }
   const low = test.refLow == null ? null : Number(test.refLow);
   const high = test.refHigh == null ? null : Number(test.refHigh);
   if (low == null && high == null) return fallback;

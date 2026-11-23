@@ -22,6 +22,7 @@ export function createCrud(cfg) {
     include = { branch: { select: { id: true, name: true, code: true } } },
     filters,
     beforeCreate,
+    beforeUpdate,
     afterWrite,
     conflictMessage,
     allowDelete = true,
@@ -101,7 +102,8 @@ export function createCrud(cfg) {
       const { branchId: _ignored, ...data } = parsed.data;
 
       const row = await prisma.$transaction(async (tx) => {
-        const updated = await tx[model].update({ where: { id }, data, include });
+        const patch = beforeUpdate ? await beforeUpdate(data) : data;
+        const updated = await tx[model].update({ where: { id }, data: patch, include });
         if (afterWrite) await afterWrite({ ...auth.ctx, target: { organizationId: existing.organizationId, branchId: existing.branchId }, tx }, updated);
         return updated;
       });

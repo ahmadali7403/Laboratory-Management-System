@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { apiContext } from "@/lib/scope";
 import { fail, handleError, json, opt, parseBody, req } from "@/lib/http";
 
-const select = { id: true, name: true, code: true, email: true, phone: true, address: true, city: true, country: true, status: true };
+const select = { id: true, name: true, code: true, email: true, phone: true, address: true, city: true, country: true, status: true, reportConsultants: true, reportFooterNote: true };
 
 export async function GET(request) {
   try {
@@ -24,6 +24,8 @@ const schema = z.object({
   phone: opt(30),
   address: opt(300),
   city: opt(100),
+  reportConsultants: opt(1500),
+  reportFooterNote: opt(300),
 });
 
 export async function PATCH(request) {

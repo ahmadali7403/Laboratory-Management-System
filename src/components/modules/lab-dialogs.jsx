@@ -37,6 +37,9 @@ export function NewOrderDialog({ scope, onClose, onSaved }) {
   const [tests, setTests] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [patientId, setPatientId] = useState("");
+  const [walk, setWalk] = useState(false);
+  const [wi, setWi] = useState({ name: "", fatherName: "", gender: "MALE", ageYears: "", phone: "" });
+  const [referredBy, setReferredBy] = useState("");
   const [doctorId, setDoctorId] = useState("");
   const [selected, setSelected] = useState({});
   const [discount, setDiscount] = useState("");
@@ -75,11 +78,12 @@ export function NewOrderDialog({ scope, onClose, onSaved }) {
   async function submit(e) {
     e.preventDefault();
     if (saving) return;
-    if (!patientId) return setError("Please select a patient.");
+    if (!walk && !patientId) return setError("Please select a patient or switch to walk-in.");
     if (!list.length) return setError("Please select at least one test.");
     setSaving(true); setError("");
     try {
-      const body = { patientId, doctorId: doctorId || null, testIds: list.map((t) => t.id), discount: disc, notes, ...(eb.needsPick ? { branchId: eb.picked } : {}) };
+      const patientPart = walk ? { walkIn: { ...wi, ageYears: wi.ageYears === "" ? null : Number(wi.ageYears) } } : { patientId };
+      const body = { ...patientPart, referredBy, doctorId: doctorId || null, testIds: list.map((t) => t.id), discount: disc, notes, ...(eb.needsPick ? { branchId: eb.picked } : {}) };
       if (Number(payAmount) > 0) body.payment = { amount: Number(payAmount), method };
       const res = await api("/api/orders", { method: "POST", body });
       toast.success(`Order ${res.orderNo} created.`);
@@ -94,18 +98,33 @@ export function NewOrderDialog({ scope, onClose, onSaved }) {
         <div className="space-y-4">
           <FormError message={error} />
           {eb.needsPick && <BranchPicker scope={scope} picked={eb.picked} onChange={(v) => { eb.setPicked(v); setPatientId(""); setSelected({}); setDoctorId(""); }} />}
-          <Field label="Patient" required hint={!b ? "Select a branch first." : "Search by name, MRN or phone."}>
-            <input value={patientQ} onChange={(e) => setPatientQ(e.target.value)} placeholder="Search patient..." className={`${inputClass} mb-2`} disabled={!b} />
-            <select required value={patientId} onChange={(e) => setPatientId(e.target.value)} className={inputClass} disabled={!b} size={Math.min(5, Math.max(2, patientList.length || 2))}>
-              {patientList.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.mrn}{p.phone ? ` · ${p.phone}` : ""}</option>)}
-            </select>
-          </Field>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs font-semibold">
+            <button type="button" onClick={() => setWalk(false)} className={`rounded-md px-3 py-1.5 ${!walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Registered patient</button>
+            <button type="button" onClick={() => setWalk(true)} className={`rounded-md px-3 py-1.5 ${walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Walk-in patient</button>
+          </div>
+          {walk ? (
+            <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
+              <Field label="Patient name" required className="col-span-2"><input required={walk} value={wi.name} maxLength={120} onChange={(e) => setWi({ ...wi, name: e.target.value })} className={inputClass} disabled={!b} /></Field>
+              <Field label="Father / husband name" className="col-span-2"><input value={wi.fatherName} maxLength={120} onChange={(e) => setWi({ ...wi, fatherName: e.target.value })} className={inputClass} disabled={!b} /></Field>
+              <Field label="Age (years)"><input type="number" min="0" max="120" value={wi.ageYears} onChange={(e) => setWi({ ...wi, ageYears: e.target.value })} className={inputClass} disabled={!b} /></Field>
+              <Field label="Gender"><select value={wi.gender} onChange={(e) => setWi({ ...wi, gender: e.target.value })} className={inputClass} disabled={!b}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></Field>
+              <Field label="Phone" className="col-span-2"><input value={wi.phone} maxLength={30} onChange={(e) => setWi({ ...wi, phone: e.target.value })} className={inputClass} disabled={!b} /></Field>
+            </div>
+          ) : (
+            <Field label="Patient" required hint={!b ? "Select a branch first." : "Search by name, MRN or phone."}>
+              <input value={patientQ} onChange={(e) => setPatientQ(e.target.value)} placeholder="Search patient..." className={`${inputClass} mb-2`} disabled={!b} />
+              <select required={!walk} value={patientId} onChange={(e) => setPatientId(e.target.value)} className={inputClass} disabled={!b} size={Math.min(5, Math.max(2, patientList.length || 2))}>
+                {patientList.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.mrn}{p.phone ? ` · ${p.phone}` : ""}</option>)}
+              </select>
+            </Field>
+          )}
           <Field label="Referring doctor">
             <select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} className={inputClass} disabled={!b}>
               <option value="">— Self / none —</option>
               {doctorList.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialization ? ` (${d.specialization})` : ""}</option>)}
             </select>
           </Field>
+          <Field label="Referred by"><input value={referredBy} maxLength={120} onChange={(e) => setReferredBy(e.target.value)} className={inputClass} placeholder="Clinic / person (optional)" /></Field>
           <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} rows={2} className={`${inputClass} h-auto py-2`} /></Field>
         </div>
 
@@ -227,33 +246,66 @@ export function OrderDetailDialog({ orderId, onClose, onChanged }) {
 // ---------------------------------------------------------------------------
 export function ResultDialog({ item, onClose, onSaved }) {
   const toast = useToast();
+  const panel = item.results?.length > 0;
   const [value, setValue] = useState(item.resultValue || "");
   const [unit, setUnit] = useState(item.unit || item.test?.unit || "");
   const [flag, setFlag] = useState(item.flag || "NORMAL");
   const [comments, setComments] = useState(item.comments || "");
+  const [rows, setRows] = useState(() => (item.results || []).map((r) => ({ id: r.id, value: r.value || "", flag: r.value ? r.flag : "" })));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const range = item.test?.refRangeText || (item.test?.refLow != null || item.test?.refHigh != null ? `${item.test.refLow ?? ""} - ${item.test.refHigh ?? ""}` : "Not defined");
+  const rangeOf = (r) => r.refRangeText || (r.refLow != null && r.refHigh != null ? `${r.refLow} - ${r.refHigh}` : r.refLow != null ? `≥ ${r.refLow}` : r.refHigh != null ? `≤ ${r.refHigh}` : "");
+  const setRow = (i, k, v) => setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
 
   async function submit(e) {
     e.preventDefault();
     if (saving) return;
     setSaving(true); setError("");
     try {
-      await api(`/api/results/${item.id}`, { method: "PATCH", body: { action: "enter", resultValue: value, unit, flag, comments } });
+      const body = panel
+        ? { action: "enter", comments, values: rows.map((r) => ({ id: r.id, value: r.value, flag: r.flag || null })) }
+        : { action: "enter", resultValue: value, unit, flag, comments };
+      await api(`/api/results/${item.id}`, { method: "PATCH", body });
       toast.success("Result saved.");
       onSaved();
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
   return (
-    <Modal open size="md" title={`Enter result · ${item.testName}`} subtitle={`${item.order.patient.name} · ${item.order.orderNo}`} onClose={saving ? undefined : onClose}
+    <Modal open size={panel ? "xl" : "md"} title={`Enter result · ${item.testName}`} subtitle={`${item.order.patient.name} · ${item.order.orderNo}`} onClose={saving ? undefined : onClose}
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="result-form" loading={saving}>Save result</Button></>}>
-      <form id="result-form" onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-        <div className="sm:col-span-2"><FormError message={error} /><p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">Reference range: <b>{range}</b> {item.test?.unit || ""}</p></div>
-        <Field label="Result" required className="sm:col-span-2"><input required autoFocus value={value} maxLength={500} onChange={(e) => setValue(e.target.value)} className={inputClass} /></Field>
-        <Field label="Unit"><input value={unit} maxLength={30} onChange={(e) => setUnit(e.target.value)} className={inputClass} /></Field>
-        <Field label="Flag" hint="Numeric results are flagged automatically from the reference range."><select value={flag} onChange={(e) => setFlag(e.target.value)} className={inputClass}>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</select></Field>
-        <Field label="Comments" className="sm:col-span-2"><textarea value={comments} maxLength={500} rows={2} onChange={(e) => setComments(e.target.value)} className={`${inputClass} h-auto py-2`} /></Field>
+      <form id="result-form" onSubmit={submit} className="space-y-4">
+        <FormError message={error} />
+        {panel ? (
+          <>
+            <p className="text-xs text-slate-500">Enter every value. Numeric values are flagged High/Low automatically from the reference range; use the Flag column only to override.</p>
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full min-w-[640px] text-sm">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-3 py-2 text-left">Parameter</th><th className="px-3 py-2 text-left">Reference</th><th className="px-3 py-2 text-left">Unit</th><th className="w-40 px-3 py-2 text-left">Result</th><th className="w-32 px-3 py-2 text-left">Flag</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {item.results.map((r, i) => (
+                    <tr key={r.id}>
+                      <td className="px-3 py-1.5 font-medium text-slate-800">{r.name}</td>
+                      <td className="px-3 py-1.5 text-slate-600">{rangeOf(r) || "—"}</td>
+                      <td className="px-3 py-1.5 text-slate-500">{r.unit || ""}</td>
+                      <td className="px-3 py-1.5"><input required value={rows[i].value} maxLength={300} onChange={(e) => setRow(i, "value", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} result`} autoFocus={i === 0} /></td>
+                      <td className="px-3 py-1.5"><select value={rows[i].flag} onChange={(e) => setRow(i, "flag", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} flag`}><option value="">Auto</option>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</select></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Field label="Comments"><textarea value={comments} maxLength={500} rows={2} onChange={(e) => setComments(e.target.value)} className={`${inputClass} h-auto py-2`} /></Field>
+          </>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2">Reference range: <b>{range}</b> {item.test?.unit || ""}</p>
+            <Field label="Result" required className="sm:col-span-2"><input required autoFocus value={value} maxLength={500} onChange={(e) => setValue(e.target.value)} className={inputClass} /></Field>
+            <Field label="Unit"><input value={unit} maxLength={30} onChange={(e) => setUnit(e.target.value)} className={inputClass} /></Field>
+            <Field label="Flag" hint="Numeric results are flagged automatically from the reference range."><select value={flag} onChange={(e) => setFlag(e.target.value)} className={inputClass}>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</select></Field>
+            <Field label="Comments" className="sm:col-span-2"><textarea value={comments} maxLength={500} rows={2} onChange={(e) => setComments(e.target.value)} className={`${inputClass} h-auto py-2`} /></Field>
+          </div>
+        )}
       </form>
     </Modal>
   );

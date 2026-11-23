@@ -16,7 +16,7 @@ export default function Sidebar({ items, user, unread }) {
   };
 
   const nav = (
-    <nav className="flex-1 space-y-0.5 overflow-y-auto px-3 py-3" aria-label="Main navigation">
+    <nav className="scroll-dark flex-1 space-y-0.5 overflow-y-auto px-3 py-3" aria-label="Main navigation">
       {items.map((item, i) => {
         if (item.section) return <p key={i} className="px-3 pb-1 pt-4 text-[10px] font-bold uppercase tracking-widest text-slate-500">{item.section}</p>;
         const Icon = Icons[item.icon] || Icons.Circle;

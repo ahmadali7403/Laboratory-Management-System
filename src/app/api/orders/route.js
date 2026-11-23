@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { apiContext, resolveWriteTarget, scopeWhere } from "@/lib/scope";
-import { fail, handleError, json, money, opt, optUuid, paging, parseBody, round2, uuid } from "@/lib/http";
+import { fail, handleError, json, money, opt, optUuid, paging, parseBody, req, round2, uuid } from "@/lib/http";
 import { nextNumber } from "@/lib/sequence";
 import { notify } from "@/lib/notify";
 import { paymentStatusFor } from "@/lib/lab";
@@ -57,7 +57,17 @@ export async function GET(request) {
 
 const createSchema = z.object({
   branchId: optUuid,
-  patientId: uuid,
+  patientId: uuid.optional(),
+  walkIn: z
+    .object({
+      name: req(2, 120, "Patient name"),
+      fatherName: opt(120),
+      gender: z.enum(["MALE", "FEMALE", "OTHER"]).default("MALE"),
+      ageYears: z.coerce.number().int().min(0).max(120).nullish(),
+      phone: opt(30),
+    })
+    .optional(),
+  referredBy: opt(120),
   doctorId: optUuid,
   testIds: z.array(uuid).min(1, "Select at least one test.").max(100),
   discount: money.default(0),
@@ -78,14 +88,18 @@ export async function POST(request) {
     const parsed = await parseBody(request, createSchema);
     if (parsed.error) return parsed.error;
     const data = parsed.data;
+    if (!data.patientId && !data.walkIn) return fail("Select a patient or enter walk-in patient details.", 400);
 
     const resolved = await resolveWriteTarget(auth.ctx, data, { branchRequired: true });
     if (resolved.error) return resolved.error;
     const { organizationId, branchId } = resolved.target;
 
     // Every referenced record must belong to the SAME organization and branch.
-    const patient = await prisma.patient.findFirst({ where: { id: data.patientId, organizationId, branchId }, select: { id: true, name: true } });
-    if (!patient) return fail("Patient not found in this branch.", 404);
+    let patient = null;
+    if (data.patientId) {
+      patient = await prisma.patient.findFirst({ where: { id: data.patientId, organizationId, branchId }, select: { id: true, name: true } });
+      if (!patient) return fail("Patient not found in this branch.", 404);
+    }
 
     if (data.doctorId) {
       const doctor = await prisma.doctor.findFirst({
@@ -98,6 +112,7 @@ export async function POST(request) {
     const testIds = [...new Set(data.testIds)];
     const tests = await prisma.test.findMany({
       where: { id: { in: testIds }, organizationId, isActive: true, OR: [{ branchId: null }, { branchId }] },
+      include: { parameters: { orderBy: { sortOrder: "asc" } } },
     });
     if (tests.length !== testIds.length) return fail("One or more selected tests are unavailable.", 400);
 
@@ -110,6 +125,17 @@ export async function POST(request) {
 
     const order = await prisma.$transaction(
       async (tx) => {
+        if (!patient) {
+          const w = data.walkIn;
+          const dob = w.ageYears != null ? new Date(Date.now() - w.ageYears * 365.25 * 86_400_000) : null;
+          patient = await tx.patient.create({
+            data: {
+              organizationId, branchId, mrn: await nextNumber(tx, organizationId, "patient", "MRN"),
+              name: w.name, fatherName: w.fatherName, gender: w.gender, dateOfBirth: dob, phone: w.phone, isWalkIn: true,
+            },
+            select: { id: true, name: true },
+          });
+        }
         const orderNo = await nextNumber(tx, organizationId, "order", "ORD");
         const types = [...new Set(tests.map((t) => t.sampleType))];
 
@@ -126,23 +152,32 @@ export async function POST(request) {
             paidAmount: initialPayment,
             paymentStatus: paymentStatusFor(total, initialPayment),
             notes: data.notes,
+            referredBy: data.referredBy,
             createdByName: auth.ctx.actor.name,
             samples: { create: types.map((sampleType, i) => ({ sampleType, sampleNo: `${orderNo}-S${i + 1}` })) },
           },
           include: { samples: true },
         });
 
-        await tx.labOrderItem.createMany({
-          data: tests.map((t) => ({
-            orderId: created.id,
-            testId: t.id,
-            sampleId: created.samples.find((s) => s.sampleType === t.sampleType)?.id || null,
-            testName: t.name,
-            testCode: t.code,
-            price: t.price,
-            unit: t.unit,
-          })),
-        });
+        for (const t of tests) {
+          await tx.labOrderItem.create({
+            data: {
+              orderId: created.id,
+              testId: t.id,
+              sampleId: created.samples.find((s) => s.sampleType === t.sampleType)?.id || null,
+              testName: t.name,
+              testCode: t.code,
+              price: t.price,
+              unit: t.unit,
+              // Snapshot of every parameter so later catalog edits never change old reports.
+              results: {
+                create: t.parameters.map((p) => ({
+                  name: p.name, unit: p.unit, refLow: p.refLow, refHigh: p.refHigh, refRangeText: p.refRangeText, sortOrder: p.sortOrder,
+                })),
+              },
+            },
+          });
+        }
 
         if (initialPayment > 0) {
           await tx.payment.create({

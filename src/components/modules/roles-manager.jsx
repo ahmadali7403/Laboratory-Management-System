@@ -24,7 +24,7 @@ export default function RolesManager() {
 
   return (
     <div>
-      <PageHeader title="Roles & Permissions" description="Define staff roles and what each role may view or manage. Assign roles in Staff Management."
+      <PageHeader title="Roles & Permissions"
         actions={data && !data.needsOrganization && <Button onClick={() => setEditing({})}><Plus size={16} /> New role</Button>} />
       {error ? <ErrorState message={error} onRetry={load} /> : !data ? <Spinner /> : data.needsOrganization ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Select an organization in the top bar to manage its roles.</p>

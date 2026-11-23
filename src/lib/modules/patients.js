@@ -6,6 +6,7 @@ import { opt, optDate, optUuid, req } from "@/lib/http";
 const patientSchema = z.object({
   branchId: optUuid,
   name: req(2, 120, "Patient name"),
+  fatherName: opt(120),
   gender: z.enum(["MALE", "FEMALE", "OTHER"]).default("OTHER"),
   dateOfBirth: optDate,
   phone: opt(30),

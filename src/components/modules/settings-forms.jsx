@@ -17,7 +17,9 @@ export default function SettingsForm({ kind, health }) {
   useEffect(() => { api(endpoint).then(setValues).catch((e) => setError(e.message)); }, [endpoint]);
 
   const fields = {
-    organization: [["name", "Organization name", true], ["email", "Email"], ["phone", "Phone"], ["city", "City"], ["address", "Address", false, true]],
+    organization: [["name", "Organization name", true], ["email", "Email"], ["phone", "Phone"], ["city", "City"], ["address", "Address", false, true],
+      ["reportConsultants", "Report footer: consultants / pathologists", false, true, true, "One per line: Name | Qualification | Title\nDr. Umer Farooq | M.B.B.S, M.Phil | Chemical Pathologist"],
+      ["reportFooterNote", "Report footer note", false, true, true, "Electronically Verified Report, No Signature(s) required."]],
     branch: [["name", "Branch name", true], ["email", "Email"], ["phone", "Phone"], ["city", "City"], ["address", "Address", false, true]],
     platform: [["platformName", "Platform name", true], ["supportEmail", "Support email"], ["defaultCountry", "Default country", true]],
   }[kind];
@@ -37,15 +39,15 @@ export default function SettingsForm({ kind, health }) {
 
   return (
     <div className="max-w-3xl">
-      <PageHeader title={titles[kind]} description={kind === "platform" ? "Global configuration for the whole platform." : kind === "branch" ? "Contact details shown on this branch's reports and invoices." : "Organization profile and contact details."} />
+      <PageHeader title={titles[kind]} />
       {error ? <ErrorState message={error} /> : !values ? <Spinner /> : (
         <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <FormError message={formError} />
           {(kind === "organization" || kind === "branch") && <p className="mb-5 text-xs text-slate-500">Code: <b>{values.code}</b> · Status: <b>{values.status}</b> (changed by your administrator)</p>}
           <div className="grid gap-4 sm:grid-cols-2">
-            {fields.map(([k, label, required, wide]) => (
+            {fields.map(([k, label, required, wide, area, placeholder]) => (
               <Field key={k} label={label} required={required} className={wide ? "sm:col-span-2" : ""}>
-                <input value={values[k] ?? ""} required={required} maxLength={300} onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} className={inputClass} type={k.toLowerCase().includes("email") ? "email" : "text"} />
+                {area ? <textarea value={values[k] ?? ""} rows={4} maxLength={1500} placeholder={placeholder} onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} className={`${inputClass} h-auto py-2`} /> : <input value={values[k] ?? ""} required={required} maxLength={300} onChange={(e) => setValues((v) => ({ ...v, [k]: e.target.value }))} className={inputClass} type={k.toLowerCase().includes("email") ? "email" : "text"} />}
               </Field>
             ))}
           </div>

@@ -20,6 +20,7 @@ export function buildNav({ actor, scope }) {
   const tail = [
     { href: "/analytics", label: "Reports & Analytics", icon: "BarChart3" },
     { href: "/notifications", label: "Notifications", icon: "Bell" },
+    { href: "/backup", label: "Backup & Restore", icon: "DatabaseBackup" },
   ];
 
   if (actor.role === "SUPER_ADMIN") {

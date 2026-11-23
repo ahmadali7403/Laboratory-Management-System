@@ -14,17 +14,17 @@ const age = (dob) => (dob ? `${Math.max(0, Math.floor((Date.now() - new Date(dob
 
 const CONFIGS = {
   patients: () => ({
-    title: "Patients", singular: "Patient", plural: "patients", endpoint: "/api/patients",
-    description: "Register and manage patients of your laboratory.", searchPlaceholder: "Search by name, MRN, phone or CNIC...",
+    title: "Patients", singular: "Patient", plural: "patients", endpoint: "/api/patients", searchPlaceholder: "Search by name, MRN, phone or CNIC...",
     columns: [
       { label: "MRN", render: (r) => <span className="font-mono text-xs font-semibold text-slate-600">{r.mrn}</span> },
-      { label: "Patient", render: (r) => <div><p className="font-semibold text-slate-800">{r.name}</p><p className="text-xs text-slate-400">{r.gender} · {age(r.dateOfBirth)}</p></div> },
+      { label: "Patient", render: (r) => <div><p className="font-semibold text-slate-800">{r.name}{r.isWalkIn && <Badge tone="violet" className="ml-2">Walk-in</Badge>}</p><p className="text-xs text-slate-400">{r.gender} · {age(r.dateOfBirth)}</p></div> },
       { label: "Phone", key: "phone" }, { label: "CNIC", key: "cnic" },
       { label: "Branch", render: branchCell },
       { label: "Registered", render: (r) => formatDate(r.createdAt) },
     ],
     form: { branch: "required", fields: [
       { name: "name", label: "Full name", required: true },
+      { name: "fatherName", label: "Father / husband name" },
       { name: "gender", label: "Gender", type: "select", required: true, default: "MALE", options: opts([["MALE", "Male"], ["FEMALE", "Female"], ["OTHER", "Other"]]) },
       { name: "dateOfBirth", label: "Date of birth", type: "date" },
       { name: "phone", label: "Phone" }, { name: "email", label: "Email", type: "email" }, { name: "cnic", label: "CNIC" },
@@ -33,7 +33,6 @@ const CONFIGS = {
   }),
   doctors: () => ({
     title: "Doctors", singular: "Doctor", plural: "doctors", endpoint: "/api/doctors", canEditRow: orgWideEdit,
-    description: "Referring doctors. Organization-wide doctors are shared by all branches.",
     columns: [
       { label: "Name", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> },
       { label: "Specialization", key: "specialization" }, { label: "Phone", key: "phone" },
@@ -46,21 +45,29 @@ const CONFIGS = {
     ] },
   }),
   tests: () => ({
-    title: "Test Catalog", singular: "Test", plural: "tests", endpoint: "/api/tests", canEditRow: orgWideEdit,
-    description: "Tests, prices and reference ranges. Organization-wide tests are available in every branch.", searchPlaceholder: "Search by name, code or category...",
+    title: "Test Catalog", singular: "Test", plural: "tests", endpoint: "/api/tests", canEditRow: orgWideEdit, searchPlaceholder: "Search by name, code or category...",
     columns: [
       { label: "Code", render: (r) => <span className="font-mono text-xs font-semibold">{r.code}</span> },
       { label: "Test", render: (r) => <div><p className="font-semibold text-slate-800">{r.name}</p><p className="text-xs text-slate-400">{r.category || "—"}</p></div> },
       { label: "Sample", key: "sampleType" }, { label: "Price", render: (r) => formatMoney(r.price) },
-      { label: "Reference", render: (r) => r.refRangeText || (r.refLow != null || r.refHigh != null ? `${r.refLow ?? "…"} - ${r.refHigh ?? "…"} ${r.unit || ""}` : "—") },
+      { label: "Parameters", render: (r) => (r.parameters?.length ? <Badge tone="blue">{r.parameters.length} parameters</Badge> : <span className="text-xs text-slate-500">{r.refRangeText || (r.refLow != null || r.refHigh != null ? `${r.refLow ?? "…"} - ${r.refHigh ?? "…"} ${r.unit || ""}` : "Single value")}</span>) },
       { label: "Available to", render: branchCell }, { label: "Status", render: (r) => <StatusBadge value={r.isActive ? "ACTIVE" : "INACTIVE"} /> },
     ],
-    form: { branch: "optional", fields: [
+    headerActions: (ctx) => ctx.scope.role === "BRANCH_ADMIN" ? null : <Button variant="secondary" onClick={async () => { try { const r = await api("/api/tests/seed-defaults", { method: "POST", body: {} }); ctx.toast.success(r.message); ctx.refresh(); } catch (e) { ctx.toast.error(e.message); } }}><FlaskConical size={15} /> Add common tests</Button>,
+    form: {
+      branch: "optional",
+      toPayload: (v) => ({
+        ...v,
+        parameters: (v.parameters || []).map((p) => ({ name: p.name, unit: p.unit || null, refLow: p.refLow === "" ? null : p.refLow, refHigh: p.refHigh === "" ? null : p.refHigh, refRangeText: p.refRangeText || null })),
+      }),
+      fields: [
       { name: "code", label: "Test code", required: true, maxLength: 30 }, { name: "name", label: "Test name", required: true },
       { name: "category", label: "Category", placeholder: "Hematology, Biochemistry..." }, { name: "sampleType", label: "Sample type", required: true, default: "Blood" },
-      { name: "price", label: "Price (Rs)", type: "number", required: true, min: 0 }, { name: "unit", label: "Result unit", placeholder: "mg/dL" },
-      { name: "refLow", label: "Reference low", type: "number" }, { name: "refHigh", label: "Reference high", type: "number" },
-      { name: "refRangeText", label: "Reference text", hint: "Optional, for non-numeric ranges", wide: true },
+      { name: "price", label: "Price (Rs)", type: "number", required: true, min: 0 },
+      { name: "unit", label: "Result unit", placeholder: "mg/dL", show: (v) => !v.parameters.length },
+      { name: "refLow", label: "Reference low", type: "number", show: (v) => !v.parameters.length }, { name: "refHigh", label: "Reference high", type: "number", show: (v) => !v.parameters.length },
+      { name: "refRangeText", label: "Reference text", hint: "Optional, for non-numeric ranges", wide: true, show: (v) => !v.parameters.length },
+      { name: "parameters", label: "Parameters (for panels like CBC, LFT)", type: "params", default: [], init: (row) => (row.parameters || []).map((p) => ({ name: p.name, unit: p.unit ?? "", refLow: p.refLow ?? "", refHigh: p.refHigh ?? "", refRangeText: p.refRangeText ?? "" })) },
       { name: "turnaroundHours", label: "Turnaround (hours)", type: "number", min: 1 },
       { name: "isActive", label: "Status", type: "checkbox", default: true, checkboxLabel: "Active" },
     ] },
@@ -79,7 +86,6 @@ const CONFIGS = {
   }),
   inventory: () => ({
     title: "Inventory", singular: "Inventory item", plural: "inventory items", endpoint: "/api/inventory",
-    description: "Reagents and consumables per branch. Stock increases when purchases are received.",
     columns: [
       { label: "Item", render: (r) => <div><p className="font-semibold text-slate-800">{r.name}</p><p className="text-xs text-slate-400">{r.sku || ""}</p></div> },
       { label: "In stock", render: (r) => { const low = Number(r.reorderLevel) > 0 && Number(r.quantity) <= Number(r.reorderLevel); return <span className={low ? "font-bold text-rose-600" : ""}>{Number(r.quantity)} {r.unit}{low && <Badge tone="red" className="ml-2">Low</Badge>}</span>; } },
@@ -130,14 +136,14 @@ function OrdersView({ scope, mode }) {
   };
   const config = useMemo(() => {
     if (mode === "reports") return {
-      ...base, title: "Laboratory Reports", description: "Completed and verified reports, ready to print.", baseParams: { status: "COMPLETED" },
+      ...base, title: "Laboratory Reports", baseParams: { status: "COMPLETED" },
       columns: [...base.columns.slice(0, 3), { label: "Completed", render: (r) => formatDateTime(r.completedAt) }],
       rowActions: [
         { label: "Open report", icon: FileText, variant: "primary", href: (r) => `/reports/${r.id}` },
       ],
     };
     if (mode === "invoices") return {
-      ...base, title: "Billing & Payments", description: "Invoices and outstanding balances.",
+      ...base, title: "Billing & Payments",
       columns: [...base.columns.slice(0, 3), { label: "Total", render: (r) => formatMoney(r.total) }, { label: "Paid", render: (r) => formatMoney(r.paidAmount) },
         { label: "Balance", render: (r) => <b className={Number(r.total) > Number(r.paidAmount) ? "text-rose-600" : ""}>{formatMoney(Number(r.total) - Number(r.paidAmount))}</b> }, { label: "Payment", render: (r) => <StatusBadge value={r.paymentStatus} /> }],
       filters: [{ key: "paymentStatus", label: "All payments", options: opts([["UNPAID", "Unpaid"], ["PARTIAL", "Partial"], ["PAID", "Paid"]]) }],
@@ -147,7 +153,7 @@ function OrdersView({ scope, mode }) {
       ],
     };
     return {
-      ...base, title: "Laboratory Orders", description: "Register tests for patients, track progress and take payment.", createLabel: "New order",
+      ...base, title: "Laboratory Orders", createLabel: "New order",
       filters: [{ key: "status", label: "All statuses", options: opts(["REGISTERED", "SAMPLE_COLLECTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"].map((s) => [s, s.replace(/_/g, " ")])) },
         { key: "paymentStatus", label: "All payments", options: opts([["UNPAID", "Unpaid"], ["PARTIAL", "Partial"], ["PAID", "Paid"]]) }],
       rowActions: [{ label: "View", icon: Eye, onClick: (r) => setDetailId(r.id) }],
@@ -204,7 +210,6 @@ function SamplesView({ scope }) {
   }
   const config = {
     title: "Sample Collection", singular: "Sample", plural: "samples", endpoint: "/api/samples", searchPlaceholder: "Search sample, order, patient or MRN...",
-    description: "Collect, receive or reject samples. Results can only be entered once a sample is collected.",
     filters: [{ key: "status", label: "All statuses", options: opts(["PENDING", "COLLECTED", "RECEIVED", "REJECTED"]) }],
     columns: [
       { label: "Sample", render: (r) => <span className="font-mono text-xs font-semibold text-blue-700">{r.sampleNo}</span> },
@@ -251,14 +256,13 @@ function ResultsView({ scope }) {
   }
   const config = {
     title: "Results", singular: "Result", plural: "results", endpoint: "/api/results", searchPlaceholder: "Search test, order, patient or MRN...",
-    description: "Enter results, then verify them. An order becomes a report once every test is verified.",
     filters: [{ key: "status", label: "All results", options: opts([["PENDING", "Awaiting entry"], ["ENTERED", "Awaiting verification"], ["VERIFIED", "Verified"]]) }],
     columns: [
       { label: "Order", render: (r) => <span className="font-mono text-xs font-semibold text-blue-700">{r.order.orderNo}</span> },
       { label: "Patient", render: (r) => <div><p className="font-semibold text-slate-800">{r.order.patient.name}</p><p className="text-xs text-slate-400">{r.order.branch.name}</p></div> },
       { label: "Test", key: "testName" },
-      { label: "Result", render: (r) => (r.resultValue ? <span>{r.resultValue} <span className="text-xs text-slate-400">{r.unit}</span> {r.flag !== "NORMAL" && <StatusBadge value={r.flag} />}</span> : "—") },
-      { label: "Reference", render: (r) => r.refRange || r.test?.refRangeText || (r.test?.refLow != null || r.test?.refHigh != null ? `${r.test.refLow ?? "…"} - ${r.test.refHigh ?? "…"}` : "—") },
+      { label: "Result", render: (r) => (r.results?.length ? <span className="text-xs text-slate-600">{r.results.filter((x) => x.value).length}/{r.results.length} entered{r.results.some((x) => x.flag !== "NORMAL" && x.value) && <Badge tone="amber" className="ml-1">abnormal</Badge>}</span> : r.resultValue ? <span>{r.resultValue} <span className="text-xs text-slate-400">{r.unit}</span> {r.flag !== "NORMAL" && <StatusBadge value={r.flag} />}</span> : "—") },
+      { label: "Reference", render: (r) => (r.results?.length ? "Panel" : r.refRange || r.test?.refRangeText || (r.test?.refLow != null || r.test?.refHigh != null ? `${r.test.refLow ?? "…"} - ${r.test.refHigh ?? "…"}` : "—")) },
       { label: "Status", render: (r) => <StatusBadge value={r.resultStatus} /> },
     ],
     rowActions: [
@@ -288,7 +292,6 @@ function PurchasesView({ scope }) {
   }
   const config = {
     title: "Purchases", singular: "Purchase", plural: "purchases", endpoint: "/api/purchases", searchPlaceholder: "Search purchase no or supplier...",
-    description: "Order stock from suppliers. Receiving a purchase increases inventory.",
     filters: [{ key: "status", label: "All statuses", options: opts(["ORDERED", "RECEIVED", "CANCELLED"]) }],
     columns: [
       { label: "Purchase", render: (r) => <span className="font-mono text-xs font-semibold text-blue-700">{r.purchaseNo}</span> },
@@ -317,7 +320,6 @@ function StaffView({ scope }) {
   const needsOrg = !scope.organizationId;
   const config = {
     title: "Staff Management", singular: "Staff member", plural: "staff", endpoint: "/api/staff", searchPlaceholder: "Search by name, email or phone...",
-    description: "Directory of laboratory staff. Staff records do not have login access; only Super, Organization and Branch admins sign in.",
     banner: () => needsOrg
       ? <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Select an organization in the top bar to add staff members.</p>
       : roles.length === 0 ? <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">No staff roles exist yet. {scope.role === "BRANCH_ADMIN" ? "Ask your organization admin to create roles." : "Create roles under Roles & Permissions first."}</p> : null,
