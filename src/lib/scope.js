@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getAdminSession, getUserSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fail, isUuid } from "@/lib/http";
+import { memo } from "@/lib/memo";
 
 /**
  * TENANT SCOPE ENGINE
@@ -33,14 +34,35 @@ export function homeFor(role) {
 export async function getActor() {
   const admin = await getAdminSession();
   if (admin) {
-    return { role: "SUPER_ADMIN", id: admin.id, name: admin.name, email: admin.email, organizationId: null, branchId: null };
+    return {
+      role: "SUPER_ADMIN",
+      id: admin.id,
+      name: admin.name,
+      email: admin.email,
+      organizationId: null,
+      branchId: null,
+    };
   }
   const user = await getUserSession();
   if (user && user.role === "ORGANIZATION_ADMIN") {
-    return { role: user.role, id: user.id, name: user.name, username: user.username, organizationId: user.organizationId, branchId: null };
+    return {
+      role: user.role,
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      organizationId: user.organizationId,
+      branchId: null,
+    };
   }
   if (user && user.role === "BRANCH_ADMIN" && user.branchId) {
-    return { role: user.role, id: user.id, name: user.name, username: user.username, organizationId: user.organizationId, branchId: user.branchId };
+    return {
+      role: user.role,
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      organizationId: user.organizationId,
+      branchId: user.branchId,
+    };
   }
   return null;
 }
@@ -78,21 +100,33 @@ export async function resolveScope(actor, narrowTo = null) {
     organizationId = actor.organizationId;
     const candidate = narrowTo || sel.branchId;
     if (candidate) {
-      const branch = await prisma.branch.findFirst({
-        where: { id: candidate, organizationId },
-        select: { id: true },
-      });
+      const branch = await memo(
+        `sb:${candidate}:${organizationId}`,
+        30_000,
+        () =>
+          prisma.branch.findFirst({
+            where: { id: candidate, organizationId },
+            select: { id: true },
+          }),
+      );
       if (branch) branchId = branch.id;
       else if (narrowTo) return { error: "NOT_FOUND" };
     }
   } else if (actor.role === "SUPER_ADMIN") {
     const candidateBranch = narrowTo || sel.branchId;
     if (candidateBranch) {
-      const branch = await prisma.branch.findUnique({
-        where: { id: candidateBranch },
-        select: { id: true, organizationId: true },
-      });
-      if (branch && (narrowTo || !sel.organizationId || branch.organizationId === sel.organizationId)) {
+      const branch = await memo(`sbu:${candidateBranch}`, 30_000, () =>
+        prisma.branch.findUnique({
+          where: { id: candidateBranch },
+          select: { id: true, organizationId: true },
+        }),
+      );
+      if (
+        branch &&
+        (narrowTo ||
+          !sel.organizationId ||
+          branch.organizationId === sel.organizationId)
+      ) {
         branchId = branch.id;
         organizationId = branch.organizationId;
       } else if (narrowTo) {
@@ -100,7 +134,12 @@ export async function resolveScope(actor, narrowTo = null) {
       }
     }
     if (!organizationId && sel.organizationId) {
-      const org = await prisma.organization.findUnique({ where: { id: sel.organizationId }, select: { id: true } });
+      const org = await memo(`so:${sel.organizationId}`, 30_000, () =>
+        prisma.organization.findUnique({
+          where: { id: sel.organizationId },
+          select: { id: true },
+        }),
+      );
       if (org) organizationId = org.id;
     }
   } else {
@@ -119,12 +158,14 @@ export async function resolveScope(actor, narrowTo = null) {
 export async function apiContext(request, { roles } = {}) {
   const actor = await getActor();
   if (!actor) return { error: fail("Unauthorized.", 401) };
-  if (roles && !roles.includes(actor.role)) return { error: fail("Forbidden.", 403) };
+  if (roles && !roles.includes(actor.role))
+    return { error: fail("Forbidden.", 403) };
 
   let narrow = null;
   if (request) {
     narrow = new URL(request.url).searchParams.get("branchId");
-    if (narrow && !isUuid(narrow)) return { error: fail("Invalid branch.", 400) };
+    if (narrow && !isUuid(narrow))
+      return { error: fail("Invalid branch.", 400) };
   }
   const scope = await resolveScope(actor, narrow || null);
   if (scope.error) return { error: fail("Branch not found.", 404) };
@@ -143,7 +184,8 @@ export const getPageContext = cache(async () => {
 export async function requireContext(roles) {
   const ctx = await getPageContext();
   if (!ctx) redirect("/login");
-  if (roles && !roles.includes(ctx.actor.role)) redirect(homeFor(ctx.actor.role));
+  if (roles && !roles.includes(ctx.actor.role))
+    redirect(homeFor(ctx.actor.role));
   return ctx;
 }
 
@@ -169,8 +211,10 @@ export function scopeWhere(scope, { shared = false } = {}) {
  * Branch admin -> own branch only; org admin -> own organization; super -> all.
  */
 export function authorityWhere(actor) {
-  if (actor.role === "BRANCH_ADMIN") return { organizationId: actor.organizationId, branchId: actor.branchId };
-  if (actor.role === "ORGANIZATION_ADMIN") return { organizationId: actor.organizationId };
+  if (actor.role === "BRANCH_ADMIN")
+    return { organizationId: actor.organizationId, branchId: actor.branchId };
+  if (actor.role === "ORGANIZATION_ADMIN")
+    return { organizationId: actor.organizationId };
   return {};
 }
 
@@ -180,52 +224,95 @@ export function authorityWhere(actor) {
  * For optional-branch modules (doctors, tests, suppliers) an explicit
  * `branchId: null` means "all branches of the organization".
  */
-export async function resolveWriteTarget({ actor, scope }, body = {}, { branchRequired = true } = {}) {
+export async function resolveWriteTarget(
+  { actor, scope },
+  body = {},
+  { branchRequired = true } = {},
+) {
   const hasKey = body.branchId !== undefined;
   const requested = hasKey ? body.branchId : undefined;
 
   if (actor.role === "BRANCH_ADMIN") {
-    if (requested && requested !== actor.branchId) return { error: fail("Branch not found.", 404) };
-    return { target: { organizationId: actor.organizationId, branchId: actor.branchId } };
+    if (requested && requested !== actor.branchId)
+      return { error: fail("Branch not found.", 404) };
+    return {
+      target: {
+        organizationId: actor.organizationId,
+        branchId: actor.branchId,
+      },
+    };
   }
 
   const wantedBranch = hasKey ? requested : scope.branchId;
 
   if (wantedBranch) {
     const where = { id: wantedBranch };
-    if (actor.role === "ORGANIZATION_ADMIN") where.organizationId = actor.organizationId;
+    if (actor.role === "ORGANIZATION_ADMIN")
+      where.organizationId = actor.organizationId;
     else if (scope.organizationId) where.organizationId = scope.organizationId;
     const branch = await prisma.branch.findFirst({
       where,
-      select: { id: true, organizationId: true, status: true, organization: { select: { status: true } } },
+      select: {
+        id: true,
+        organizationId: true,
+        status: true,
+        organization: { select: { status: true } },
+      },
     });
     if (!branch) return { error: fail("Branch not found.", 404) };
-    if (branch.status !== "ACTIVE") return { error: fail("This branch is inactive.", 409) };
-    if (branch.organization.status !== "ACTIVE") return { error: fail("This organization is not active.", 409) };
-    return { target: { organizationId: branch.organizationId, branchId: branch.id } };
+    if (branch.status !== "ACTIVE")
+      return { error: fail("This branch is inactive.", 409) };
+    if (branch.organization.status !== "ACTIVE")
+      return { error: fail("This organization is not active.", 409) };
+    return {
+      target: { organizationId: branch.organizationId, branchId: branch.id },
+    };
   }
 
   if (branchRequired) return { error: fail("Please select a branch.", 400) };
 
-  const organizationId = actor.role === "ORGANIZATION_ADMIN" ? actor.organizationId : scope.organizationId;
-  if (!organizationId) return { error: fail("Please select an organization or a branch first.", 400) };
+  const organizationId =
+    actor.role === "ORGANIZATION_ADMIN"
+      ? actor.organizationId
+      : scope.organizationId;
+  if (!organizationId)
+    return {
+      error: fail("Please select an organization or a branch first.", 400),
+    };
   if (actor.role === "SUPER_ADMIN") {
-    const org = await prisma.organization.findUnique({ where: { id: organizationId }, select: { status: true } });
+    const org = await prisma.organization.findUnique({
+      where: { id: organizationId },
+      select: { status: true },
+    });
     if (!org) return { error: fail("Organization not found.", 404) };
-    if (org.status !== "ACTIVE") return { error: fail("This organization is not active.", 409) };
+    if (org.status !== "ACTIVE")
+      return { error: fail("This organization is not active.", 409) };
   }
   return { target: { organizationId, branchId: null } };
 }
 
 /** Org-level target (no branch) used by roles/staff/settings style modules. */
 export async function resolveOrganizationTarget(ctx) {
-  const res = await resolveWriteTarget(ctx, { branchId: null }, { branchRequired: false });
+  const res = await resolveWriteTarget(
+    ctx,
+    { branchId: null },
+    { branchRequired: false },
+  );
   return res;
 }
 
 // ---- Data for the topbar selector -----------------------------------------
 export async function getScopeOptions({ actor, scope }) {
-  const orgWhere = actor.role === "SUPER_ADMIN" ? {} : { id: actor.organizationId };
+  return memo(
+    `opts:${actor.role}:${actor.organizationId || ""}:${actor.branchId || ""}:${scope.organizationId || ""}`,
+    10_000,
+    () => loadScopeOptions({ actor, scope }),
+  );
+}
+
+async function loadScopeOptions({ actor, scope }) {
+  const orgWhere =
+    actor.role === "SUPER_ADMIN" ? {} : { id: actor.organizationId };
   const organizations =
     actor.role === "SUPER_ADMIN"
       ? await prisma.organization.findMany({
@@ -240,15 +327,31 @@ export async function getScopeOptions({ actor, scope }) {
   if (actor.role === "BRANCH_ADMIN") {
     branches = await prisma.branch.findMany({
       where: { id: actor.branchId, organizationId: actor.organizationId },
-      select: { id: true, name: true, code: true, status: true, organizationId: true, organization: { select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        status: true,
+        organizationId: true,
+        organization: { select: { name: true } },
+      },
     });
   } else {
     const branchWhere = {};
-    if (actor.role === "ORGANIZATION_ADMIN") branchWhere.organizationId = actor.organizationId;
-    else if (scope.organizationId) branchWhere.organizationId = scope.organizationId;
+    if (actor.role === "ORGANIZATION_ADMIN")
+      branchWhere.organizationId = actor.organizationId;
+    else if (scope.organizationId)
+      branchWhere.organizationId = scope.organizationId;
     branches = await prisma.branch.findMany({
       where: branchWhere,
-      select: { id: true, name: true, code: true, status: true, organizationId: true, organization: { select: { name: true } } },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        status: true,
+        organizationId: true,
+        organization: { select: { name: true } },
+      },
       orderBy: [{ organizationId: "asc" }, { name: "asc" }],
       take: 1000,
     });
