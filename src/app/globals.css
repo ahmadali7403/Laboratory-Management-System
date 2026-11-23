@@ -51,3 +51,6 @@ img, svg, video, canvas { max-width: 100%; }
 .scroll-dark::-webkit-scrollbar { width: 6px; }
 .scroll-dark::-webkit-scrollbar-thumb { background: #334155; background-clip: content-box; }
 .scroll-dark::-webkit-scrollbar-thumb:hover { background: #475569; background-clip: content-box; }
+
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

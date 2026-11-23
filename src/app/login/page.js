@@ -35,9 +35,9 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-slate-950 px-4 py-10">
-      <div className="grid w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl shadow-black/20 lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="relative hidden min-h-[620px] flex-col justify-between overflow-hidden bg-gradient-to-br from-blue-700 via-blue-800 to-slate-950 p-10 text-white lg:flex">
+    <main className="fixed inset-0 flex items-center justify-center overflow-hidden bg-slate-950 p-3 sm:p-6">
+      <div className="grid h-full max-h-[660px] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl shadow-black/20 lg:grid-cols-[1.05fr_0.95fr]">
+        <section className="relative hidden h-full flex-col justify-between overflow-hidden bg-gradient-to-br from-blue-700 via-blue-800 to-slate-950 p-10 text-white lg:flex">
           <div className="absolute -right-24 -top-24 h-80 w-80 rounded-full border-[50px] border-white/5" />
           <div className="absolute -bottom-32 -left-20 h-96 w-96 rounded-full border-[60px] border-white/5" />
           <div className="relative z-10 flex items-center gap-3">
@@ -52,12 +52,12 @@ export default function LoginPage() {
           <p className="relative z-10 text-xs text-blue-100/60">© 2026 LabOS. Platform administration.</p>
         </section>
 
-        <section className="flex min-h-[620px] items-center justify-center px-6 py-12 sm:px-12">
-          <div className="w-full max-w-sm">
-            <div className="mb-9 lg:hidden">
+        <section className="no-scrollbar flex h-full overflow-y-auto px-6 py-8 sm:px-12">
+          <div className="m-auto w-full max-w-sm">
+            <div className="mb-7 lg:hidden">
               <div className="flex items-center gap-3"><div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 text-white"><FlaskConical size={23} /></div><div><p className="text-xl font-bold text-slate-900">LabOS</p><p className="text-xs text-slate-500">Platform Administration</p></div></div>
             </div>
-            <div className="mb-8">
+            <div className="mb-7">
               <p className="text-sm font-semibold text-blue-600">WELCOME BACK</p>
               <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Sign in to LabOS</h2>
               <p className="mt-2 text-sm text-slate-500">Sign in with your Super Admin email or organization/branch username.</p>
@@ -86,7 +86,7 @@ export default function LoginPage() {
               <button type="submit" disabled={loading} className="flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">{loading ? "Signing in..." : "Sign in securely"}</button>
             </form>
 
-            <div className="mt-8 flex items-center justify-center gap-2 text-xs text-slate-400"><ShieldCheck size={14} /> Secure access for Super Admin, Organizations and Branches</div>
+            <div className="mt-7 flex items-center justify-center gap-2 text-center text-xs text-slate-400"><ShieldCheck size={14} /> Secure access for Super Admin, Organizations and Branches</div>
           </div>
         </section>
       </div>
