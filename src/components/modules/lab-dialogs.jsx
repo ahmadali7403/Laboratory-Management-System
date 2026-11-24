@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Ban, CreditCard, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { api, formatDateTime, formatMoney, toInputDate } from "@/lib/client";
-import { Badge, Button, Field, FormError, Modal, Spinner, StatusBadge, inputClass, useConfirm, useDebounced, useToast } from "@/components/ui";
+import { Badge, Button, Field, FormError, Modal, Select, Spinner, StatusBadge, inputClass, useConfirm, useDebounced, useToast } from "@/components/ui";
 
 const METHODS = [["CASH", "Cash"], ["CARD", "Card"], ["BANK_TRANSFER", "Bank transfer"], ["ONLINE", "Online"]];
 
@@ -17,16 +17,16 @@ function useEffectiveBranch(scope) {
 function BranchPicker({ scope, picked, onChange }) {
   return (
     <Field label="Branch" required className="sm:col-span-2">
-      <select required value={picked} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+      <Select required value={picked} onChange={(e) => onChange(e.target.value)} className={inputClass}>
         <option value="">Select a branch</option>
         {scope.branches.map((b) => <option key={b.id} value={b.id}>{scope.role === "SUPER_ADMIN" && !scope.organizationId ? `${b.organizationName} — ${b.name}` : b.name}</option>)}
-      </select>
+      </Select>
     </Field>
   );
 }
 
 // ---------------------------------------------------------------------------
-export function NewOrderDialog({ scope, onClose, onSaved }) {
+export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false }) {
   const toast = useToast();
   const eb = useEffectiveBranch(scope);
   const [patientQ, setPatientQ] = useState("");
@@ -37,7 +37,7 @@ export function NewOrderDialog({ scope, onClose, onSaved }) {
   const [tests, setTests] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [patientId, setPatientId] = useState("");
-  const [walk, setWalk] = useState(false);
+  const [walk, setWalk] = useState(Boolean(initialWalk));
   const [wi, setWi] = useState({ name: "", fatherName: "", gender: "MALE", ageYears: "", phone: "" });
   const [referredBy, setReferredBy] = useState("");
   const [doctorId, setDoctorId] = useState("");
@@ -107,22 +107,22 @@ export function NewOrderDialog({ scope, onClose, onSaved }) {
               <Field label="Patient name" required className="col-span-2"><input required={walk} value={wi.name} maxLength={120} onChange={(e) => setWi({ ...wi, name: e.target.value })} className={inputClass} disabled={!b} /></Field>
               <Field label="Father / husband name" className="col-span-2"><input value={wi.fatherName} maxLength={120} onChange={(e) => setWi({ ...wi, fatherName: e.target.value })} className={inputClass} disabled={!b} /></Field>
               <Field label="Age (years)"><input type="number" min="0" max="120" value={wi.ageYears} onChange={(e) => setWi({ ...wi, ageYears: e.target.value })} className={inputClass} disabled={!b} /></Field>
-              <Field label="Gender"><select value={wi.gender} onChange={(e) => setWi({ ...wi, gender: e.target.value })} className={inputClass} disabled={!b}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></Field>
+              <Field label="Gender"><Select value={wi.gender} onChange={(e) => setWi({ ...wi, gender: e.target.value })} className={inputClass} disabled={!b}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></Select></Field>
               <Field label="Phone" className="col-span-2"><input value={wi.phone} maxLength={30} onChange={(e) => setWi({ ...wi, phone: e.target.value })} className={inputClass} disabled={!b} /></Field>
             </div>
           ) : (
             <Field label="Patient" required hint={!b ? "Select a branch first." : "Search by name, MRN or phone."}>
               <input value={patientQ} onChange={(e) => setPatientQ(e.target.value)} placeholder="Search patient..." className={`${inputClass} mb-2`} disabled={!b} />
-              <select required={!walk} value={patientId} onChange={(e) => setPatientId(e.target.value)} className={inputClass} disabled={!b} size={Math.min(5, Math.max(2, patientList.length || 2))}>
+              <Select required={!walk} value={patientId} onChange={(e) => setPatientId(e.target.value)} className={inputClass} disabled={!b} size={Math.min(5, Math.max(2, patientList.length || 2))}>
                 {patientList.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.mrn}{p.phone ? ` · ${p.phone}` : ""}</option>)}
-              </select>
+              </Select>
             </Field>
           )}
           <Field label="Referring doctor">
-            <select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} className={inputClass} disabled={!b}>
+            <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} className={inputClass} disabled={!b}>
               <option value="">— Self / none —</option>
               {doctorList.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialization ? ` (${d.specialization})` : ""}</option>)}
-            </select>
+            </Select>
           </Field>
           <Field label="Referred by"><input value={referredBy} maxLength={120} onChange={(e) => setReferredBy(e.target.value)} className={inputClass} placeholder="Clinic / person (optional)" /></Field>
           <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} rows={2} className={`${inputClass} h-auto py-2`} /></Field>
@@ -145,7 +145,7 @@ export function NewOrderDialog({ scope, onClose, onSaved }) {
           <div className="grid grid-cols-2 gap-3">
             <Field label="Discount (Rs)"><input type="number" min="0" step="any" value={discount} onChange={(e) => setDiscount(e.target.value)} className={inputClass} /></Field>
             <Field label="Payment now (Rs)"><input type="number" min="0" max={total} step="any" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className={inputClass} /></Field>
-            <Field label="Method" className="col-span-2"><select value={method} onChange={(e) => setMethod(e.target.value)} className={inputClass}>{METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+            <Field label="Method" className="col-span-2"><Select value={method} onChange={(e) => setMethod(e.target.value)} className={inputClass}>{METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></Field>
           </div>
           <div className="rounded-xl bg-slate-50 p-4 text-sm">
             <Row l="Subtotal" v={formatMoney(subtotal)} /><Row l="Discount" v={`- ${formatMoney(disc)}`} />
@@ -185,7 +185,7 @@ export function PaymentDialog({ order, onClose, onSaved }) {
       <form id="pay-form" onSubmit={submit} className="space-y-4">
         <FormError message={error} />
         <Field label="Amount (Rs)" required><input type="number" required min="0.01" max={balance} step="any" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputClass} /></Field>
-        <Field label="Method"><select value={method} onChange={(e) => setMethod(e.target.value)} className={inputClass}>{METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
+        <Field label="Method"><Select value={method} onChange={(e) => setMethod(e.target.value)} className={inputClass}>{METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></Field>
         <Field label="Reference"><input value={reference} maxLength={100} onChange={(e) => setReference(e.target.value)} className={inputClass} placeholder="Transaction / slip no." /></Field>
       </form>
     </Modal>
@@ -289,7 +289,7 @@ export function ResultDialog({ item, onClose, onSaved }) {
                       <td className="px-3 py-1.5 text-slate-600">{rangeOf(r) || "—"}</td>
                       <td className="px-3 py-1.5 text-slate-500">{r.unit || ""}</td>
                       <td className="px-3 py-1.5"><input required value={rows[i].value} maxLength={300} onChange={(e) => setRow(i, "value", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} result`} autoFocus={i === 0} /></td>
-                      <td className="px-3 py-1.5"><select value={rows[i].flag} onChange={(e) => setRow(i, "flag", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} flag`}><option value="">Auto</option>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</select></td>
+                      <td className="px-3 py-1.5"><Select value={rows[i].flag} onChange={(e) => setRow(i, "flag", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} flag`}><option value="">Auto</option>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</Select></td>
                     </tr>
                   ))}
                 </tbody>
@@ -302,7 +302,7 @@ export function ResultDialog({ item, onClose, onSaved }) {
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2">Reference range: <b>{range}</b> {item.test?.unit || ""}</p>
             <Field label="Result" required className="sm:col-span-2"><input required autoFocus value={value} maxLength={500} onChange={(e) => setValue(e.target.value)} className={inputClass} /></Field>
             <Field label="Unit"><input value={unit} maxLength={30} onChange={(e) => setUnit(e.target.value)} className={inputClass} /></Field>
-            <Field label="Flag" hint="Numeric results are flagged automatically from the reference range."><select value={flag} onChange={(e) => setFlag(e.target.value)} className={inputClass}>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</select></Field>
+            <Field label="Flag" hint="Numeric results are flagged automatically from the reference range."><Select value={flag} onChange={(e) => setFlag(e.target.value)} className={inputClass}>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</Select></Field>
             <Field label="Comments" className="sm:col-span-2"><textarea value={comments} maxLength={500} rows={2} onChange={(e) => setComments(e.target.value)} className={`${inputClass} h-auto py-2`} /></Field>
           </div>
         )}
@@ -359,7 +359,7 @@ export function NewPurchaseDialog({ scope, onClose, onSaved }) {
         <FormError message={error} />
         <div className="grid gap-4 sm:grid-cols-2">
           {eb.needsPick && <BranchPicker scope={scope} picked={eb.picked} onChange={(v) => { eb.setPicked(v); setSupplierId(""); setLines([{ inventoryItemId: "", quantity: "", unitCost: "" }]); }} />}
-          <Field label="Supplier" required><select required value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className={inputClass} disabled={!b}><option value="">Select supplier</option>{supplierList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+          <Field label="Supplier" required><Select required value={supplierId} onChange={(e) => setSupplierId(e.target.value)} className={inputClass} disabled={!b}><option value="">Select supplier</option>{supplierList.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></Field>
           <Field label="Purchase date" required><input type="date" required value={date} onChange={(e) => setDate(e.target.value)} className={inputClass} /></Field>
         </div>
         <div>
@@ -367,7 +367,7 @@ export function NewPurchaseDialog({ scope, onClose, onSaved }) {
           <div className="space-y-2">
             {lines.map((l, i) => (
               <div key={i} className="grid grid-cols-[1fr_5rem_6rem_2rem] items-center gap-2">
-                <select required value={l.inventoryItemId} onChange={(e) => setLine(i, "inventoryItemId", e.target.value)} className={inputClass} disabled={!b} aria-label="Item"><option value="">Select item</option>{stockList.map((s) => <option key={s.id} value={s.id} disabled={lines.some((x, j) => j !== i && x.inventoryItemId === s.id)}>{s.name} ({s.unit})</option>)}</select>
+                <Select required value={l.inventoryItemId} onChange={(e) => setLine(i, "inventoryItemId", e.target.value)} className={inputClass} disabled={!b} aria-label="Item"><option value="">Select item</option>{stockList.map((s) => <option key={s.id} value={s.id} disabled={lines.some((x, j) => j !== i && x.inventoryItemId === s.id)}>{s.name} ({s.unit})</option>)}</Select>
                 <input required type="number" min="0.01" step="any" placeholder="Qty" value={l.quantity} onChange={(e) => setLine(i, "quantity", e.target.value)} className={inputClass} aria-label="Quantity" />
                 <input required type="number" min="0" step="any" placeholder="Unit cost" value={l.unitCost} onChange={(e) => setLine(i, "unitCost", e.target.value)} className={inputClass} aria-label="Unit cost" />
                 <Button variant="ghost" size="icon" disabled={lines.length === 1} onClick={() => setLines((ls) => ls.filter((_, j) => j !== i))} aria-label="Remove line"><Trash2 size={15} /></Button>

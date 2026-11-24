@@ -18,6 +18,7 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
+import { Select } from "@/components/ui";
 
 const initialValues = {
   name: "",
@@ -70,7 +71,7 @@ function Field({
           required={required}
           className={`w-full rounded-xl border border-gray-200 bg-white py-3 ${
             isPassword ? "pr-11" : "pr-4"
-          } pl-10 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10`}
+          } pl-10 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]`}
         />
 
         {isPassword && (
@@ -301,16 +302,16 @@ export default function BranchForm({
                     Branch Status
                   </label>
 
-                  <select
+                  <Select
                     id="status"
                     name="status"
                     value={form.status}
                     onChange={handleChange}
-                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 outline-none focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10"
+                    
                   >
                     <option value="ACTIVE">Active</option>
                     <option value="INACTIVE">Inactive</option>
-                  </select>
+                  </Select>
                 </div>
               )}
 
@@ -329,7 +330,7 @@ export default function BranchForm({
                   value={form.address}
                   onChange={handleChange}
                   placeholder="Enter complete branch address"
-                  className="w-full resize-y rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10"
+                  className="w-full resize-y rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 outline-none placeholder:text-gray-400 focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]"
                 />
               </div>
 
@@ -339,7 +340,7 @@ export default function BranchForm({
                   name="isHeadOffice"
                   checked={form.isHeadOffice}
                   onChange={handleChange}
-                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600"
                 />
 
                 <span>

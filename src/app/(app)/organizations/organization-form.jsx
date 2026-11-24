@@ -16,6 +16,7 @@ import {
   MapPin,
   Hash,
 } from "lucide-react";
+import { Select } from "@/components/ui";
 
 const initialForm = {
   name: "",
@@ -67,7 +68,7 @@ function Field({
             onChange={onChange}
             placeholder={placeholder}
             rows={3}
-            className="w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10"
+            className="w-full resize-none rounded-xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm text-gray-800 outline-none transition focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]"
           />
         ) : (
           <input
@@ -78,7 +79,7 @@ function Field({
             onChange={onChange}
             placeholder={placeholder}
             required={required}
-            className="w-full rounded-xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10"
+            className="w-full rounded-xl border border-gray-200 bg-white py-3 pl-10 pr-4 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]"
           />
         )}
       </div>
@@ -347,17 +348,17 @@ export default function OrganizationForm({
                       Organization Status
                     </label>
 
-                    <select
+                    <Select
                       id="status"
                       name="status"
                       value={form.status}
                       onChange={handleChange}
-                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm text-gray-800 outline-none transition focus:border-blue-500 focus:ring-3 focus:ring-blue-500/10"
+                      
                     >
                       <option value="ACTIVE">Active</option>
                       <option value="SUSPENDED">Suspended</option>
                       <option value="INACTIVE">Inactive</option>
-                    </select>
+                    </Select>
                   </div>
                 )}
               </div>

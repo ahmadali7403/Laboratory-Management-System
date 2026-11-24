@@ -1,5 +1,11 @@
 "use client";
 
+// Every create / update / delete reports its result as a popup. UIProvider listens
+// and drops this one when the calling screen already showed its own message.
+function notifyToast(type, message) {
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("labos:toast", { detail: { type, message } }));
+}
+
 /** Small fetch wrapper for client components. Throws Error(message) on failure. */
 export async function api(url, { method = "GET", body, signal } = {}) {
   const res = await fetch(url, {
@@ -19,7 +25,16 @@ export async function api(url, { method = "GET", body, signal } = {}) {
     window.location.replace("/login");
     throw new Error("Session expired. Please sign in again.");
   }
-  if (!res.ok) throw new Error(data?.message || `Request failed (${res.status}).`);
+  const mutating = method !== "GET";
+  if (!res.ok) {
+    const message = data?.message || `Request failed (${res.status}).`;
+    if (mutating) notifyToast("error", message);
+    throw new Error(message);
+  }
+  if (mutating) {
+    const fallback = method === "DELETE" ? "Deleted successfully." : method === "POST" ? "Saved successfully." : "Updated successfully.";
+    notifyToast("success", data?.message || fallback);
+  }
   return data;
 }
 

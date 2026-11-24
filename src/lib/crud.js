@@ -21,6 +21,7 @@ export function createCrud(cfg) {
     orderBy = [{ createdAt: "desc" }],
     include = { branch: { select: { id: true, name: true, code: true } } },
     filters,
+    extra,
     beforeCreate,
     beforeUpdate,
     afterWrite,
@@ -50,7 +51,8 @@ export function createCrud(cfg) {
         db().findMany({ where, orderBy, skip, take, include }),
         db().count({ where }),
       ]);
-      return json({ items, total, page, pageSize });
+      const more = extra ? await extra(where) : {};
+      return json({ items, total, page, pageSize, ...more });
     } catch (error) {
       return handleError(error, `${label} list`);
     }
@@ -102,7 +104,7 @@ export function createCrud(cfg) {
       const { branchId: _ignored, ...data } = parsed.data;
 
       const row = await prisma.$transaction(async (tx) => {
-        const patch = beforeUpdate ? await beforeUpdate(data) : data;
+        const patch = beforeUpdate ? await beforeUpdate(data, existing) : data;
         const updated = await tx[model].update({ where: { id }, data: patch, include });
         if (afterWrite) await afterWrite({ ...auth.ctx, target: { organizationId: existing.organizationId, branchId: existing.branchId }, tx }, updated);
         return updated;

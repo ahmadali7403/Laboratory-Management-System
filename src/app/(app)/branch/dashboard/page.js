@@ -1,3 +1,5 @@
+
+import { connection } from "next/server";
 import { requireContext } from "@/lib/scope";
 import { getLabStats, getDashboardCharts } from "@/lib/stats";
 import { prisma } from "@/lib/prisma";
@@ -13,6 +15,9 @@ import {
 export const instant = false;
 
 export default async function BranchDashboardPage() {
+  // Render this dashboard at request time
+  await connection();
+
   const { actor, scope } = await requireContext(["BRANCH_ADMIN"]);
 
   const [stats, charts, branch] = await Promise.all([

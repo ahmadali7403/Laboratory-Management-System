@@ -5,6 +5,7 @@ import { fail, handleError, json, money, opt, optUuid, paging, parseBody, req, r
 import { nextNumber } from "@/lib/sequence";
 import { notify } from "@/lib/notify";
 import { paymentStatusFor } from "@/lib/lab";
+import { optPersonName, personName, phoneField } from "@/lib/validators";
 
 const STATUSES = ["REGISTERED", "SAMPLE_COLLECTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
 const PAY = ["UNPAID", "PARTIAL", "PAID"];
@@ -60,11 +61,11 @@ const createSchema = z.object({
   patientId: uuid.optional(),
   walkIn: z
     .object({
-      name: req(2, 120, "Patient name"),
-      fatherName: opt(120),
+      name: personName("Patient name"),
+      fatherName: optPersonName(120),
       gender: z.enum(["MALE", "FEMALE", "OTHER"]).default("MALE"),
       ageYears: z.coerce.number().int().min(0).max(120).nullish(),
-      phone: opt(30),
+      phone: phoneField,
     })
     .optional(),
   referredBy: opt(120),
@@ -125,6 +126,16 @@ export async function POST(request) {
 
     const order = await prisma.$transaction(
       async (tx) => {
+        if (!patient) {
+          const w = data.walkIn;
+          // Reuse an existing record (same branch, same phone and name) so walk-ins never create duplicates.
+          if (w.phone) {
+            patient = await tx.patient.findFirst({
+              where: { organizationId, branchId, phone: w.phone, name: { equals: w.name, mode: "insensitive" } },
+              select: { id: true, name: true },
+            });
+          }
+        }
         if (!patient) {
           const w = data.walkIn;
           const dob = w.ageYears != null ? new Date(Date.now() - w.ageYears * 365.25 * 86_400_000) : null;

@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { createCrud } from "@/lib/crud";
 import { opt, optUuid, req } from "@/lib/http";
+import { personName, phoneField } from "@/lib/validators";
 
 const schema = z.object({
   branchId: optUuid,
-  name: req(2, 120, "Doctor name"),
+  name: personName("Doctor name"),
   specialization: opt(120),
-  phone: opt(30),
+  phone: phoneField,
   email: z.string().trim().email("Invalid email address.").max(120).nullish().or(z.literal("")).transform((v) => v || null),
   isActive: z.boolean().default(true),
 });

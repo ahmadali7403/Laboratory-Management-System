@@ -126,6 +126,7 @@ export function handleError(error, label = "API", conflictMessage) {
   if (error instanceof z.ZodError) {
     return fail(error.issues[0]?.message || "Invalid information.", 400);
   }
+  if (error?.userMessage) return fail(error.userMessage, 409);
   const code = error?.code;
   if (code === "P2002") {
     return fail(

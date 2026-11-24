@@ -2,11 +2,12 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_NAMES, apiContext, authorityWhere } from "@/lib/scope";
 import { fail, handleError, isUuid, json, opt, parseBody, req, uuid } from "@/lib/http";
+import { personName, phoneField } from "@/lib/validators";
 
 const schema = z.object({
-  name: req(2, 120, "Name").optional(),
+  name: personName("Name").optional(),
   email: z.string().trim().email("Invalid email address.").max(120).optional(),
-  phone: opt(30),
+  phone: phoneField,
   roleId: uuid.optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
 });

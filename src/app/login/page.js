@@ -2,10 +2,20 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { UIProvider, useToast } from "@/components/ui";
 import { Eye, EyeOff, FlaskConical, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 
 export default function LoginPage() {
+  return (
+    <UIProvider>
+      <LoginForm />
+    </UIProvider>
+  );
+}
+
+function LoginForm() {
   const router = useRouter();
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -25,10 +35,12 @@ export default function LoginPage() {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Login failed.");
+      try { sessionStorage.setItem("labos:flash", "Signed in successfully."); } catch { /* ignore */ }
       router.replace(data.redirectTo || "/dashboard");
       router.refresh();
     } catch (err) {
       setError(err.message || "Login process mein error aa gaya.");
+      toast.error(err.message || "Login failed.");
     } finally {
       setLoading(false);
     }
@@ -68,7 +80,7 @@ export default function LoginPage() {
                 <span className="mb-2 block text-sm font-medium text-slate-700">Username or email</span>
                 <span className="relative block">
                   <Mail size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input type="text" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@example.com or lab_username" className="h-12 w-full rounded-xl border border-slate-200 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
+                  <input type="text" required autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="admin@example.com or lab_username" className="h-12 w-full rounded-xl border border-slate-200 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]" />
                 </span>
               </label>
 
@@ -76,7 +88,7 @@ export default function LoginPage() {
                 <span className="mb-2 block text-sm font-medium text-slate-700">Password</span>
                 <span className="relative block">
                   <LockKeyhole size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input type={showPassword ? "text" : "password"} required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" className="h-12 w-full rounded-xl border border-slate-200 pl-11 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
+                  <input type={showPassword ? "text" : "password"} required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Enter your password" className="h-12 w-full rounded-xl border border-slate-200 pl-11 pr-12 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]" />
                   <button type="button" onClick={() => setShowPassword((value) => !value)} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-400 hover:text-slate-700" aria-label={showPassword ? "Hide password" : "Show password"}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button>
                 </span>
               </label>

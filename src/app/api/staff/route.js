@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_NAMES, apiContext, resolveWriteTarget } from "@/lib/scope";
 import { fail, handleError, json, opt, optUuid, paging, parseBody, req, uuid } from "@/lib/http";
+import { personName, phoneField } from "@/lib/validators";
 
 const staffInclude = {
   userRoles: { select: { role: { select: { id: true, name: true } } } },
@@ -56,9 +57,9 @@ export async function GET(request) {
 
 const schema = z.object({
   branchId: optUuid,
-  name: req(2, 120, "Name"),
+  name: personName("Name"),
   email: z.string().trim().email("Invalid email address.").max(120).nullish().or(z.literal("")).transform((v) => v || null),
-  phone: opt(30),
+  phone: phoneField,
   roleId: uuid,
 });
 

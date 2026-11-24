@@ -200,7 +200,7 @@ export default function AccountCredentials({ title, username, endpoint }) {
                   onChange={(e) => setNewUsername(e.target.value)}
                   minLength={3}
                   maxLength={40}
-                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-blue-500"
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]"
                 />
               </label>
 
@@ -217,7 +217,7 @@ export default function AccountCredentials({ title, username, endpoint }) {
                     minLength={8}
                     maxLength={100}
                     placeholder="At least 8 characters"
-                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 outline-none focus:border-blue-500"
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 pr-10 text-sm text-gray-900 outline-none focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]"
                   />
 
                   <button

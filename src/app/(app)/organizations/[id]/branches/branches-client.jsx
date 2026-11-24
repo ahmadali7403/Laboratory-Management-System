@@ -186,7 +186,7 @@ export default function BranchesClient({ organization }) {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Search branches..."
-                  className="w-full rounded-xl border border-gray-200 py-2.5 pl-10 pr-4 text-sm text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-blue-500 sm:w-64"
+                  className="h-8 w-full rounded-md border border-gray-200 pl-9 pr-3 text-[13px] text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)] sm:w-52"
                 />
               </div>
 

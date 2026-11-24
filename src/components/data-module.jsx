@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/client";
+import { cleanCnicInput, cleanPersonName, cleanPhoneInput } from "@/lib/validators";
 import DataMenu from "@/components/data-tools";
 import ParametersEditor from "@/components/parameters-editor";
 import {
@@ -16,6 +18,7 @@ import {
   PageHeader,
   PageSizeSelect,
   Pagination,
+  Select,
   Spinner,
   inputClass,
   useConfirm,
@@ -52,6 +55,15 @@ export default function DataModule({ config, scope }) {
     extra: null,
   });
   const [form, setForm] = useState(null); // { mode, row }
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => {
+    if (searchParams.get("new") === "1" && config.form && (!config.canCreate || config.canCreate(scope))) {
+      setForm({ mode: "create" });
+      router.replace(pathname, { scroll: false });
+    }
+  }, [searchParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = useCallback(() => {
     RESPONSE_CACHE.clear();
@@ -165,7 +177,7 @@ export default function DataModule({ config, scope }) {
     config.form || (config.rowActions && config.rowActions.length > 0);
   const headerActions = (
     <>
-      <Button variant="secondary" onClick={refresh} aria-label="Refresh">
+      <Button variant="secondary" onClick={refresh} aria-label="Refresh" title="Refresh">
         <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
       </Button>
       {config.headerActions?.(ctx)}
@@ -195,12 +207,12 @@ export default function DataModule({ config, scope }) {
         actions={headerActions}
       />
       {config.banner?.(scope)}
-      <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-2 border-b border-slate-100 p-2.5 sm:flex-row sm:items-center">
-          <div className="relative flex-1">
+      <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-col gap-1.5 border-b border-slate-100 p-2 sm:flex-row sm:items-center">
+          <div className="relative w-full sm:w-56 sm:flex-none">
             <Search
-              size={16}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              size={14}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
               value={q}
@@ -209,19 +221,19 @@ export default function DataModule({ config, scope }) {
                 setPage(1);
               }}
               placeholder={config.searchPlaceholder || "Search..."}
-              className={`${inputClass} pl-9`}
+              className={`${inputClass} pl-8`}
               aria-label="Search"
             />
           </div>
           {(config.filters || []).map((f) => (
-            <select
+            <Select
               key={f.key}
               value={filters[f.key] || ""}
               onChange={(e) => {
                 setFilters((s) => ({ ...s, [f.key]: e.target.value }));
                 setPage(1);
               }}
-              className={`${inputClass} sm:w-48`}
+              className="sm:w-40"
               aria-label={f.label}
             >
               <option value="">{f.label}</option>
@@ -230,12 +242,19 @@ export default function DataModule({ config, scope }) {
                   {o.label}
                 </option>
               ))}
-            </select>
+            </Select>
           ))}
+          {config.dateRange && (
+            <div className="flex items-center gap-1 text-xs text-slate-500">
+              <input type="date" aria-label="From date" value={filters.from || ""} max={filters.to || undefined} onChange={(e) => { setFilters((s) => ({ ...s, from: e.target.value })); setPage(1); }} className={`${inputClass} w-32`} />
+              <span>to</span>
+              <input type="date" aria-label="To date" value={filters.to || ""} min={filters.from || undefined} onChange={(e) => { setFilters((s) => ({ ...s, to: e.target.value })); setPage(1); }} className={`${inputClass} w-32`} />
+            </div>
+          )}
           <PageSizeSelect
             value={pageSize}
             onChange={changePageSize}
-            className="sm:w-28"
+            className="sm:ml-auto"
           />
         </div>
 
@@ -262,14 +281,17 @@ export default function DataModule({ config, scope }) {
               <>
                 {/* Compact cards replace wide tables on phones and tablets. */}
                 <div
-                  className={`grid gap-2 p-2 sm:grid-cols-2 xl:hidden ${loading ? "opacity-60" : ""}`}
+                  className={`grid gap-2 p-2 sm:grid-cols-2 lg:grid-cols-3 xl:hidden ${loading ? "opacity-60" : ""}`}
                 >
-                  {view.items.map((row) => (
+                  {view.items.map((row, idx) => (
                     <article
                       key={row.id}
-                      className="min-w-0 rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+                      className="min-w-0 rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm"
                     >
-                      <dl className="grid min-w-0 grid-cols-1 gap-2">
+                      <p className="mb-1 text-[10px] font-bold text-slate-400">
+                        #{(page - 1) * pageSize + idx + 1}
+                      </p>
+                      <dl className="grid min-w-0 grid-cols-1 gap-1.5">
                         {config.columns.map((c, index) => (
                           <div
                             key={c.label}
@@ -348,28 +370,32 @@ export default function DataModule({ config, scope }) {
                   <table className="w-full table-fixed text-left text-sm">
                     <thead className="bg-slate-50 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
                       <tr>
+                        <th className="w-10 px-2 py-1.5 text-center">#</th>
                         {config.columns.map((c) => (
                           <th
                             key={c.label}
-                            className={`break-words px-2.5 py-2 ${c.className || ""}`}
+                            className={`break-words px-2 py-1.5 ${c.className || ""}`}
                           >
                             {c.label}
                           </th>
                         ))}
                         {hasActions && (
-                          <th className="w-40 px-2.5 py-2 text-right">
+                          <th className="w-32 px-2 py-1.5 text-right">
                             Actions
                           </th>
                         )}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {view.items.map((row) => (
+                      {view.items.map((row, idx) => (
                         <tr key={row.id} className="hover:bg-slate-50/60">
+                          <td className="px-2 py-1 text-center text-xs font-semibold tabular-nums text-slate-400">
+                            {(page - 1) * pageSize + idx + 1}
+                          </td>
                           {config.columns.map((c) => (
                             <td
                               key={c.label}
-                              className={`break-words px-2.5 py-1.5 align-middle text-slate-700 ${c.className || ""}`}
+                              className={`break-words px-2 py-1 align-middle text-[13px] text-slate-700 ${c.className || ""}`}
                             >
                               {c.render
                                 ? c.render(row, scope)
@@ -377,7 +403,7 @@ export default function DataModule({ config, scope }) {
                             </td>
                           ))}
                           {hasActions && (
-                            <td className="px-2 py-1.5">
+                            <td className="px-2 py-1">
                               <div className="flex flex-wrap items-center justify-end gap-1">
                                 {(config.rowActions || []).map(
                                   (a) =>
@@ -468,6 +494,19 @@ export default function DataModule({ config, scope }) {
   );
 }
 
+// Field widths on the 4-column desktop grid: f.span = 1..4 (default by type).
+function spanClass(f) {
+  const span = f.span || (f.type === "textarea" || f.wide || f.type === "params" ? 4 : f.type === "checkbox" ? 1 : f.mask === "name" || f.type === "email" ? 2 : 1);
+  return { 1: "", 2: "sm:col-span-2", 3: "sm:col-span-2 lg:col-span-3", 4: "sm:col-span-2 lg:col-span-4" }[span];
+}
+const MASK_INPUT_MODE = { phone: "tel", cnic: "numeric" };
+function applyMask(f, v) {
+  if (f.mask === "phone") return cleanPhoneInput(v);
+  if (f.mask === "cnic") return cleanCnicInput(v);
+  if (f.mask === "name") return cleanPersonName(v);
+  return v;
+}
+
 function initialValues(config, scope, mode, row) {
   const v = {};
   for (const f of config.form.fields) {
@@ -541,7 +580,7 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
   return (
     <Modal
       open
-      size="lg"
+      size="xl"
       title={`${mode === "create" ? "New" : "Edit"} ${config.singular}`}
       onClose={saving ? undefined : onClose}
       footer={
@@ -557,23 +596,22 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
     >
       <form id="record-form" onSubmit={submit}>
         <FormError message={error} />
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
           {showBranch && (
             <Field
               label="Branch"
               required={branchMode === "required"}
-              className="sm:col-span-2"
+              className="lg:col-span-2"
               hint={
                 branchMode === "optional"
                   ? "Choose “All branches” to share it with every branch of the organization."
                   : undefined
               }
             >
-              <select
+              <Select
                 value={branchId}
                 onChange={(e) => setBranchId(e.target.value)}
                 required={branchMode === "required"}
-                className={inputClass}
               >
                 <option value="">
                   {branchMode === "optional"
@@ -587,7 +625,7 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
                       : b.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           )}
           {config.form.fields
@@ -599,28 +637,26 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
             )
             .map((f) =>
               f.type === "params" ? (
-                <ParametersEditor
-                  key={f.name}
-                  label={f.label}
-                  value={values[f.name]}
-                  onChange={(v) => set(f.name, v)}
-                />
+                <div key={f.name} className="sm:col-span-2 lg:col-span-4">
+                  <ParametersEditor
+                    label={f.label}
+                    value={values[f.name]}
+                    onChange={(v) => set(f.name, v)}
+                  />
+                </div>
               ) : (
                 <Field
                   key={f.name}
                   label={f.label}
                   required={f.required}
                   hint={f.hint}
-                  className={
-                    f.type === "textarea" || f.wide ? "sm:col-span-2" : ""
-                  }
+                  className={spanClass(f)}
                 >
                   {f.type === "select" ? (
-                    <select
+                    <Select
                       value={values[f.name]}
                       onChange={(e) => set(f.name, e.target.value)}
                       required={f.required}
-                      className={inputClass}
                     >
                       {!f.required && <option value="">—</option>}
                       {f.required && values[f.name] === "" && (
@@ -631,17 +667,17 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
                           {o.label}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   ) : f.type === "textarea" ? (
                     <textarea
                       value={values[f.name]}
                       onChange={(e) => set(f.name, e.target.value)}
-                      rows={3}
+                      rows={2}
                       maxLength={f.maxLength || 500}
-                      className={`${inputClass} h-auto py-2`}
+                      className={`${inputClass} h-auto py-1.5`}
                     />
                   ) : f.type === "checkbox" ? (
-                    <span className="flex h-10 items-center gap-2 text-sm text-slate-700">
+                    <span className="flex h-8 items-center gap-2 text-[13px] text-slate-700">
                       <input
                         type="checkbox"
                         checked={values[f.name]}
@@ -654,8 +690,11 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
                     <input
                       type={f.type || "text"}
                       value={values[f.name]}
-                      onChange={(e) => set(f.name, e.target.value)}
+                      onChange={(e) => set(f.name, applyMask(f, e.target.value))}
                       required={f.required}
+                      inputMode={MASK_INPUT_MODE[f.mask]}
+                      pattern={f.pattern}
+                      title={f.patternMessage}
                       step={f.step || (f.type === "number" ? "any" : undefined)}
                       min={f.min}
                       maxLength={f.maxLength || 200}

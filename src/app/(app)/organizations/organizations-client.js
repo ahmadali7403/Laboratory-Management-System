@@ -22,6 +22,7 @@ import {
   X,
   AlertTriangle,
 } from "lucide-react";
+import { Select } from "@/components/ui";
 
 const statusStyles = {
   ACTIVE: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
@@ -303,7 +304,7 @@ export default function OrganizationsClient({ adminName }) {
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search name, code, city..."
-                  className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 sm:w-64"
+                  className="h-8 w-full rounded-md border border-slate-200 bg-white pl-8 pr-3 text-[13px] outline-none focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)] sm:w-52"
                 />
               </div>
 
@@ -312,16 +313,16 @@ export default function OrganizationsClient({ adminName }) {
                   size={15}
                   className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
                 />
-                <select
+                <Select
                   value={status}
                   onChange={(e) => setStatus(e.target.value)}
-                  className="h-10 w-full appearance-none rounded-xl border border-slate-200 bg-white pl-9 pr-9 text-sm text-slate-700 outline-none focus:border-blue-500 sm:w-40"
+                  className="sm:w-40"
                 >
                   <option value="ALL">All statuses</option>
                   <option value="ACTIVE">Active</option>
                   <option value="SUSPENDED">Suspended</option>
                   <option value="INACTIVE">Inactive</option>
-                </select>
+                </Select>
               </div>
 
               <button

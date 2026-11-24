@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Check, Eye, FileText, FlaskConical, PackageCheck, Plus, Printer, ReceiptText, RotateCcw, ShieldCheck, TestTube2, X, XCircle, Droplet } from "lucide-react";
 import DataModule from "@/components/data-module";
 import { Badge, Button, Field, Modal, StatusBadge, inputClass, useConfirm, useToast } from "@/components/ui";
@@ -23,12 +24,13 @@ const CONFIGS = {
       { label: "Registered", render: (r) => formatDate(r.createdAt) },
     ],
     form: { branch: "required", fields: [
-      { name: "name", label: "Full name", required: true },
-      { name: "fatherName", label: "Father / husband name" },
+      { name: "name", label: "Full name", required: true, mask: "name", maxLength: 120 },
+      { name: "fatherName", label: "Father / husband name", mask: "name", maxLength: 120 },
       { name: "gender", label: "Gender", type: "select", required: true, default: "MALE", options: opts([["MALE", "Male"], ["FEMALE", "Female"], ["OTHER", "Other"]]) },
       { name: "dateOfBirth", label: "Date of birth", type: "date" },
-      { name: "phone", label: "Phone" }, { name: "email", label: "Email", type: "email" }, { name: "cnic", label: "CNIC" },
-      { name: "address", label: "Address", type: "textarea" },
+      { name: "phone", label: "Phone", mask: "phone", maxLength: 16, placeholder: "03XXXXXXXXX" }, { name: "cnic", label: "CNIC", mask: "cnic", maxLength: 15, placeholder: "35202-1234567-1" },
+      { name: "email", label: "Email", type: "email", span: 2 },
+      { name: "address", label: "Address", span: 4, maxLength: 300 },
     ] },
   }),
   doctors: () => ({
@@ -39,8 +41,8 @@ const CONFIGS = {
       { label: "Available to", render: branchCell }, { label: "Status", render: (r) => <StatusBadge value={r.isActive ? "ACTIVE" : "INACTIVE"} /> },
     ],
     form: { branch: "optional", fields: [
-      { name: "name", label: "Doctor name", required: true }, { name: "specialization", label: "Specialization" },
-      { name: "phone", label: "Phone" }, { name: "email", label: "Email", type: "email" },
+      { name: "name", label: "Doctor name", required: true, mask: "name", span: 2 }, { name: "specialization", label: "Specialization" },
+      { name: "phone", label: "Phone", mask: "phone", maxLength: 16 }, { name: "email", label: "Email", type: "email", span: 2 },
       { name: "isActive", label: "Status", type: "checkbox", default: true, checkboxLabel: "Active" },
     ] },
   }),
@@ -66,7 +68,7 @@ const CONFIGS = {
       { name: "price", label: "Price (Rs)", type: "number", required: true, min: 0 },
       { name: "unit", label: "Result unit", placeholder: "mg/dL", show: (v) => !v.parameters.length },
       { name: "refLow", label: "Reference low", type: "number", show: (v) => !v.parameters.length }, { name: "refHigh", label: "Reference high", type: "number", show: (v) => !v.parameters.length },
-      { name: "refRangeText", label: "Reference text", hint: "Optional, for non-numeric ranges", wide: true, show: (v) => !v.parameters.length },
+      { name: "refRangeText", label: "Reference text", hint: "Optional, for non-numeric ranges", span: 2, show: (v) => !v.parameters.length },
       { name: "parameters", label: "Parameters (for panels like CBC, LFT)", type: "params", default: [], init: (row) => (row.parameters || []).map((p) => ({ name: p.name, unit: p.unit ?? "", refLow: p.refLow ?? "", refHigh: p.refHigh ?? "", refRangeText: p.refRangeText ?? "" })) },
       { name: "turnaroundHours", label: "Turnaround (hours)", type: "number", min: 1 },
       { name: "isActive", label: "Status", type: "checkbox", default: true, checkboxLabel: "Active" },
@@ -80,7 +82,7 @@ const CONFIGS = {
     ],
     form: { branch: "optional", fields: [
       { name: "name", label: "Supplier name", required: true }, { name: "contactPerson", label: "Contact person" },
-      { name: "phone", label: "Phone" }, { name: "email", label: "Email", type: "email" }, { name: "address", label: "Address", type: "textarea" },
+      { name: "phone", label: "Phone", mask: "phone", maxLength: 16 }, { name: "email", label: "Email", type: "email", span: 2 }, { name: "address", label: "Address", span: 3, maxLength: 300 },
       { name: "isActive", label: "Status", type: "checkbox", default: true, checkboxLabel: "Active" },
     ] },
   }),
@@ -103,14 +105,19 @@ const CONFIGS = {
     title: "Expenses", singular: "Expense", plural: "expenses", endpoint: "/api/expenses", searchPlaceholder: "Search category or description...",
     columns: [
       { label: "Date", render: (r) => formatDate(r.expenseDate) }, { label: "Category", render: (r) => <span className="font-semibold text-slate-800">{r.category}</span> },
-      { label: "Description", key: "description" }, { label: "Amount", render: (r) => formatMoney(r.amount) },
+      { label: "Description", key: "description" }, { label: "Method", render: (r) => String(r.paymentMethod || "CASH").replace("_", " ") },
+      { label: "Amount", className: "text-right", render: (r) => <b className="tabular-nums">{formatMoney(r.amount)}</b> },
       { label: "Branch", render: branchCell }, { label: "Added by", key: "createdByName" },
     ],
+    filters: [{ key: "paymentMethod", label: "All methods", options: opts([["CASH", "Cash"], ["CARD", "Card"], ["BANK_TRANSFER", "Bank transfer"], ["ONLINE", "Online"], ["CHEQUE", "Cheque"]]) }],
+    dateRange: true,
+    footer: (d) => d && <p className="mt-2 text-right text-xs font-semibold text-slate-700">Total expenses (all filtered entries): {formatMoney(d.totalAmount || 0)}</p>,
     form: { branch: "required", fields: [
-      { name: "category", label: "Category", required: true, placeholder: "Rent, Utilities, Salaries..." },
-      { name: "amount", label: "Amount (Rs)", type: "number", required: true, min: 0 },
+      { name: "category", label: "Category", required: true, placeholder: "Rent, Utilities, Salaries...", maxLength: 80 },
+      { name: "amount", label: "Amount (Rs)", type: "number", required: true, min: 0.01, step: "0.01" },
       { name: "expenseDate", label: "Date", type: "date", required: true, default: new Date().toISOString().slice(0, 10) },
-      { name: "description", label: "Description", type: "textarea" },
+      { name: "paymentMethod", label: "Payment method", type: "select", required: true, default: "CASH", options: opts([["CASH", "Cash"], ["CARD", "Card"], ["BANK_TRANSFER", "Bank transfer"], ["ONLINE", "Online"], ["CHEQUE", "Cheque"]]) },
+      { name: "description", label: "Description", span: 4, maxLength: 300 },
     ] },
   }),
 };
@@ -119,6 +126,18 @@ const CONFIGS = {
 function OrdersView({ scope, mode }) {
   const [detailId, setDetailId] = useState(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [walkFirst, setWalkFirst] = useState(false);
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => {
+    const n = sp.get("new");
+    if (mode === "orders" && (n === "1" || n === "walkin")) {
+      setWalkFirst(n === "walkin");
+      setNewOpen(true);
+      router.replace(pathname, { scroll: false });
+    }
+  }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   const [payOrder, setPayOrder] = useState(null);
   const [bump, setBump] = useState(0);
 
@@ -164,7 +183,7 @@ function OrdersView({ scope, mode }) {
   return (
     <>
       <DataModule key={`${mode}-${bump}`} config={config} scope={scope} />
-      {newOpen && <NewOrderDialog scope={scope} onClose={() => setNewOpen(false)} onSaved={() => { setNewOpen(false); setBump((b) => b + 1); }} />}
+      {newOpen && <NewOrderDialog initialWalk={walkFirst} scope={scope} onClose={() => setNewOpen(false)} onSaved={() => { setNewOpen(false); setBump((b) => b + 1); }} />}
       {detailId && <OrderDetailDialog orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => setBump((b) => b + 1)} />}
       {payOrder && <PaymentDialog order={payOrder} onClose={() => setPayOrder(null)} onSaved={() => { setPayOrder(null); setBump((b) => b + 1); }} />}
     </>
@@ -333,9 +352,9 @@ function StaffView({ scope }) {
       branch: "required",
       toPayload: (v) => { const p = { ...v }; if (!p.email) delete p.email; return p; },
       fields: [
-        { name: "name", label: "Full name", required: true },
+        { name: "name", label: "Full name", required: true, mask: "name", span: 2 },
         { name: "roleId", label: "Role", type: "select", required: true, options: roles.map((r) => ({ value: r.id, label: r.name })), init: (row) => row.role?.id || "" },
-        { name: "email", label: "Email", type: "email" }, { name: "phone", label: "Phone" },
+        { name: "email", label: "Email", type: "email", span: 2 }, { name: "phone", label: "Phone", mask: "phone", maxLength: 16 },
         { name: "status", label: "Status", type: "select", required: true, default: "ACTIVE", options: opts([["ACTIVE", "Active"], ["INACTIVE", "Inactive"]]), editOnly: true },
       ],
     },

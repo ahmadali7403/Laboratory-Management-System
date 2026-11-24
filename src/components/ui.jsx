@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  Children,
   createContext,
+  isValidElement,
   useCallback,
   useContext,
   useEffect,
@@ -9,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -16,6 +19,8 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ChevronDown,
+  Search,
   Info,
   Loader2,
   Inbox,
@@ -33,7 +38,16 @@ export function UIProvider({ children }) {
   const [dialog, setDialog] = useState(null);
   const idRef = useRef(0);
 
-  const push = useCallback((type, message) => {
+  const autoTimers = useRef(new Set());
+  const push = useCallback((type, message, auto = false) => {
+    if (auto) {
+      // wait a moment: if the screen shows its own message, this automatic one is skipped
+      const t = setTimeout(() => { autoTimers.current.delete(t); push(type, message); }, 300);
+      autoTimers.current.add(t);
+      return;
+    }
+    autoTimers.current.forEach(clearTimeout);
+    autoTimers.current.clear();
     const id = ++idRef.current;
     setToasts((t) => [...t.slice(-3), { id, type, message }]);
     setTimeout(
@@ -50,6 +64,23 @@ export function UIProvider({ children }) {
     }),
     [push],
   );
+
+  // One-time message handed over from another page (e.g. "Signed in successfully." after login).
+  useEffect(() => {
+    try {
+      const flash = sessionStorage.getItem("labos:flash");
+      if (flash) {
+        sessionStorage.removeItem("labos:flash");
+        push("success", flash);
+      }
+    } catch { /* storage blocked */ }
+  }, [push]);
+
+  useEffect(() => {
+    const onAuto = (e) => push(e.detail.type, e.detail.message, true);
+    window.addEventListener("labos:toast", onAuto);
+    return () => window.removeEventListener("labos:toast", onAuto);
+  }, [push]);
 
   const confirm = useCallback(
     (options) => new Promise((resolve) => setDialog({ ...options, resolve })),
@@ -81,7 +112,7 @@ export function UIProvider({ children }) {
             <div
               key={t.id}
               role="status"
-              className={`pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 text-sm shadow-lg ${tones[t.type]}`}
+              className={`pointer-events-auto flex items-start gap-3 rounded-lg border px-3 py-2 text-[13px] shadow-lg ${tones[t.type]}`}
             >
               <Icon size={18} className="mt-0.5 shrink-0" />
               <p className="flex-1">{t.message}</p>
@@ -153,9 +184,9 @@ export function Button({
     success: "bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm",
   };
   const sizes = {
-    sm: "h-8 px-3 text-xs",
-    md: "h-10 px-4 text-sm",
-    icon: "h-8 w-8 text-xs",
+    sm: "h-7 px-2.5 text-xs",
+    md: "h-8 px-3 text-[13px]",
+    icon: "h-7 w-7 text-xs",
   };
   return (
     <button
@@ -171,18 +202,18 @@ export function Button({
 }
 
 export const inputClass =
-  "h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:bg-slate-50 disabled:text-slate-500";
+  "h-8 w-full rounded-md border border-slate-200 bg-white px-2.5 text-[13px] text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)] disabled:bg-slate-50 disabled:text-slate-500";
 
 export function Field({ label, hint, required, children, className = "" }) {
   return (
     <label className={`block ${className}`}>
-      <span className="mb-1.5 block text-xs font-semibold text-slate-700">
+      <span className="mb-0.5 block text-[11px] font-semibold text-slate-600">
         {label}
         {required && <span className="ml-0.5 text-rose-500">*</span>}
       </span>
       {children}
       {hint && (
-        <span className="mt-1 block text-[11px] text-slate-400">{hint}</span>
+        <span className="mt-0.5 block text-[10px] text-slate-400">{hint}</span>
       )}
     </label>
   );
@@ -224,7 +255,7 @@ const STATUS_TONE = {
 export function Badge({ tone = "gray", children, className = "" }) {
   return (
     <span
-      className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${BADGE[tone]} ${className}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-px text-[10px] font-semibold ring-1 ring-inset ${BADGE[tone]} ${className}`}
     >
       {children}
     </span>
@@ -241,13 +272,13 @@ export function StatusBadge({ value }) {
 
 export function PageHeader({ title, description, actions }) {
   return (
-    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="mb-2 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
-        <h1 className="text-xl font-bold tracking-tight text-slate-900">
+        <h1 className="text-base font-bold tracking-tight text-slate-900">
           {title}
         </h1>
         {description && (
-          <p className="mt-0.5 text-xs text-slate-500">{description}</p>
+          <p className="text-[11px] text-slate-500">{description}</p>
         )}
       </div>
       {actions && (
@@ -259,7 +290,7 @@ export function PageHeader({ title, description, actions }) {
 
 export function EmptyState({ title = "Nothing here yet", message, action }) {
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-14 text-center">
+    <div className="flex flex-col items-center justify-center px-6 py-8 text-center">
       <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
         <Inbox size={22} />
       </span>
@@ -274,7 +305,7 @@ export function EmptyState({ title = "Nothing here yet", message, action }) {
 
 export function ErrorState({ message, onRetry }) {
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-14 text-center">
+    <div className="flex flex-col items-center justify-center px-6 py-8 text-center">
       <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-rose-50 text-rose-500">
         <AlertTriangle size={22} />
       </span>
@@ -298,7 +329,7 @@ export function ErrorState({ message, onRetry }) {
 
 export function Spinner({ label = "Loading..." }) {
   return (
-    <div className="flex items-center justify-center gap-2 px-6 py-14 text-sm text-slate-500">
+    <div className="flex items-center justify-center gap-2 px-6 py-8 text-sm text-slate-500">
       <Loader2 size={18} className="animate-spin" /> {label}
     </div>
   );
@@ -306,23 +337,40 @@ export function Spinner({ label = "Loading..." }) {
 
 export const PAGE_SIZES = [10, 20, 50, 100];
 
-/** "Rows: 10 / 20 / 50 / 100" selector (placed in the filter bar above the table). */
+/** "Show [10 v] entries" selector. */
 export function PageSizeSelect({ value, onChange, className = "" }) {
   return (
-    <select
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      aria-label="Rows per page"
-      title="Rows per page"
-      className={`${inputClass} ${className}`}
-    >
-      {PAGE_SIZES.map((n) => (
-        <option key={n} value={n}>
-          {n} rows
-        </option>
-      ))}
-    </select>
+    <label className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-slate-500 ${className}`}>
+      Show
+      <Select
+        value={String(value)}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label="Entries per page"
+        className="!w-16"
+        searchable={false}
+      >
+        {PAGE_SIZES.map((n) => (
+          <option key={n} value={String(n)}>{n}</option>
+        ))}
+      </Select>
+      entries
+    </label>
   );
+}
+
+/** 1 2 3 ... 11 12 style page list. */
+export function pageList(page, pages) {
+  if (pages <= 7) return Array.from({ length: pages }, (_, i) => i + 1);
+  const out = new Set([1, 2, pages - 1, pages, page - 1, page, page + 1]);
+  if (page <= 3) [3, 4].forEach((n) => out.add(n));
+  if (page >= pages - 2) [pages - 3, pages - 2].forEach((n) => out.add(n));
+  const sorted = [...out].filter((n) => n >= 1 && n <= pages).sort((x, y) => x - y);
+  const res = [];
+  sorted.forEach((n, i) => {
+    if (i && n - sorted[i - 1] > 1) res.push("…");
+    res.push(n);
+  });
+  return res;
 }
 
 export function Pagination({ page, pageSize, total, onChange }) {
@@ -330,52 +378,215 @@ export function Pagination({ page, pageSize, total, onChange }) {
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const from = (page - 1) * pageSize + 1;
   const to = Math.min(total, page * pageSize);
+  const btn = "inline-flex h-6 min-w-6 items-center justify-center rounded border px-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40";
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 text-xs text-slate-500">
-      <span>
-        Showing {from}–{to} of {total} · Page {page} of {pages}
-      </span>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-2.5 py-1.5 text-xs text-slate-500">
+      <span>Showing {from}–{to} of {total} entries</span>
       {pages > 1 && (
-        <div className="flex gap-1">
-          <Button
-            variant="secondary"
-            size="icon"
-            disabled={page <= 1}
-            onClick={() => onChange(1)}
-            aria-label="First page"
-          >
-            <ChevronsLeft size={15} />
-          </Button>
-          <Button
-            variant="secondary"
-            size="icon"
-            disabled={page <= 1}
-            onClick={() => onChange(page - 1)}
-            aria-label="Previous page"
-          >
-            <ChevronLeft size={15} />
-          </Button>
-          <Button
-            variant="secondary"
-            size="icon"
-            disabled={page >= pages}
-            onClick={() => onChange(page + 1)}
-            aria-label="Next page"
-          >
-            <ChevronRight size={15} />
-          </Button>
-          <Button
-            variant="secondary"
-            size="icon"
-            disabled={page >= pages}
-            onClick={() => onChange(pages)}
-            aria-label="Last page"
-          >
-            <ChevronsRight size={15} />
-          </Button>
-        </div>
+        <nav className="flex items-center gap-1" aria-label="Pagination">
+          <button type="button" className={`${btn} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`} disabled={page <= 1} onClick={() => onChange(page - 1)} aria-label="Previous page" title="Previous">
+            <ChevronLeft size={14} />
+          </button>
+          {pageList(page, pages).map((n, i) =>
+            n === "…" ? (
+              <span key={`e${i}`} className="px-1 text-slate-400">…</span>
+            ) : (
+              <button key={n} type="button" onClick={() => onChange(n)} aria-current={n === page ? "page" : undefined} className={`${btn} ${n === page ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                {n}
+              </button>
+            ),
+          )}
+          <button type="button" className={`${btn} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`} disabled={page >= pages} onClick={() => onChange(page + 1)} aria-label="Next page" title="Next">
+            <ChevronRight size={14} />
+          </button>
+        </nav>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Select: drop-in replacement for <select> with a search box.
+// Accepts <option> children and onChange(e) with e.target.value, exactly like
+// a native select, so every dropdown in the app can share it.
+// ---------------------------------------------------------------------------
+function textOf(node) {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement(node)) return textOf(node.props.children);
+  return "";
+}
+function collectOptions(children, out = []) {
+  Children.forEach(children, (child) => {
+    if (!isValidElement(child)) return;
+    if (child.type === "option") {
+      const label = textOf(child.props.children);
+      out.push({
+        value: child.props.value !== undefined ? String(child.props.value) : label,
+        label,
+        disabled: Boolean(child.props.disabled),
+      });
+    } else if (child.props?.children) collectOptions(child.props.children, out);
+  });
+  return out;
+}
+
+export function Select({
+  value,
+  onChange,
+  children,
+  className = "",
+  disabled,
+  required,
+  searchable = true,
+  size: _size, // native listbox size is ignored
+  multiple: _multiple,
+  ...rest
+}) {
+  const options = useMemo(() => collectOptions(children), [children]);
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [hi, setHi] = useState(0);
+  const [pos, setPos] = useState(null);
+  const btnRef = useRef(null);
+  const panelRef = useRef(null);
+  const searchRef = useRef(null);
+  const cur = options.find((o) => o.value === String(value ?? ""));
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return t ? options.filter((o) => o.label.toLowerCase().includes(t)) : options;
+  }, [options, q]);
+
+  const place = useCallback(() => {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = window.innerHeight - r.bottom;
+    const h = 260;
+    const up = below < h && r.top > below;
+    setPos({
+      left: Math.max(4, Math.min(r.left, window.innerWidth - Math.max(r.width, 180) - 4)),
+      width: Math.max(r.width, 180),
+      top: up ? undefined : r.bottom + 2,
+      bottom: up ? window.innerHeight - r.top + 2 : undefined,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    place();
+    const onDoc = (e) => {
+      if (btnRef.current?.contains(e.target) || panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onMove = (e) => {
+      if (panelRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", onMove, true);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", onMove, true);
+    };
+  }, [open, place]);
+
+  useEffect(() => {
+    if (open) setTimeout(() => (searchRef.current || panelRef.current)?.focus(), 0);
+  }, [open]);
+
+  function openMenu() {
+    if (disabled) return;
+    setQ("");
+    const i = options.findIndex((o) => o.value === String(value ?? ""));
+    setHi(Math.max(0, i));
+    setOpen(true);
+  }
+  function pick(o) {
+    if (!o || o.disabled) return;
+    onChange?.({ target: { value: o.value, name: rest.name }, currentTarget: { value: o.value } });
+    setOpen(false);
+    btnRef.current?.focus();
+  }
+  function onKey(e) {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false); btnRef.current?.focus(); }
+    else if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(shown.length - 1, h + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
+    else if (e.key === "Enter") { e.preventDefault(); pick(shown[hi]); }
+  }
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.querySelector(`[data-i="${hi}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [hi, open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        disabled={disabled}
+        onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={(e) => {
+          if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); openMenu(); }
+        }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={rest["aria-label"]}
+        title={rest.title}
+        className={`${inputClass} flex items-center justify-between gap-1 text-left ${className}`}
+      >
+        <span className={`min-w-0 flex-1 truncate ${cur && cur.value !== "" ? "" : "text-slate-400"}`}>
+          {cur ? cur.label || "—" : "Select..."}
+        </span>
+        <ChevronDown size={14} className="shrink-0 text-slate-400" />
+      </button>
+      {required && (
+        <input tabIndex={-1} aria-hidden="true" required value={String(value ?? "")} onChange={() => {}} className="pointer-events-none absolute h-0 w-0 opacity-0" />
+      )}
+      {open && pos && typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={panelRef}
+            tabIndex={-1}
+            onKeyDown={onKey}
+            style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
+            className="z-[90] overflow-hidden rounded-md border border-slate-200 bg-white shadow-xl outline-none"
+          >
+            {searchable && (
+              <div className="relative border-b border-slate-100 p-1">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  ref={searchRef}
+                  value={q}
+                  onChange={(e) => { setQ(e.target.value); setHi(0); }}
+                  placeholder="Search..."
+                  className="h-7 w-full rounded border border-slate-200 pl-7 pr-2 text-xs outline-none focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]"
+                />
+              </div>
+            )}
+            <ul role="listbox" className="max-h-52 overflow-y-auto py-0.5">
+              {shown.length === 0 && <li className="px-3 py-2 text-center text-xs text-slate-400">No results found</li>}
+              {shown.map((o, i) => (
+                <li
+                  key={`${o.value}-${i}`}
+                  data-i={i}
+                  role="option"
+                  aria-selected={o.value === String(value ?? "")}
+                  aria-disabled={o.disabled}
+                  onMouseEnter={() => setHi(i)}
+                  onMouseDown={(e) => { e.preventDefault(); pick(o); }}
+                  className={`cursor-pointer truncate px-2.5 py-1 text-[13px] ${o.disabled ? "cursor-not-allowed text-slate-300" : i === hi ? "bg-blue-50 text-blue-800" : "text-slate-700"} ${o.value === String(value ?? "") ? "font-semibold" : ""}`}
+                >
+                  {o.label || "—"}
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -407,8 +618,8 @@ export function Modal({
   const widths = {
     sm: "max-w-md",
     md: "max-w-xl",
-    lg: "max-w-3xl",
-    xl: "max-w-5xl",
+    lg: "max-w-4xl",
+    xl: "max-w-6xl",
   };
   return (
     <div
@@ -419,11 +630,11 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`flex max-h-[92vh] w-full ${widths[size]} flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl`}
+        className={`flex max-h-[92vh] w-full ${widths[size]} flex-col overflow-hidden rounded-t-xl bg-white shadow-2xl sm:rounded-xl`}
       >
-        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-2.5">
           <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-slate-900">
+            <h2 className="truncate text-sm font-semibold text-slate-900">
               {title}
             </h2>
             {subtitle && (
@@ -438,11 +649,11 @@ export function Modal({
             <X size={18} />
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {children}
         </div>
         {footer && (
-          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-2">
             {footer}
           </div>
         )}
@@ -456,7 +667,7 @@ export function FormError({ message }) {
   return (
     <div
       role="alert"
-      className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700"
+      className="mb-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs text-rose-700"
     >
       {message}
     </div>
