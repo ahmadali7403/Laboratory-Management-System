@@ -52,7 +52,7 @@ export function UIProvider({ children }) {
     setToasts((t) => [...t.slice(-3), { id, type, message }]);
     setTimeout(
       () => setToasts((t) => t.filter((x) => x.id !== id)),
-      type === "error" ? 6000 : 3500,
+      type === "error" ? 6000 : 1200,
     );
   }, []);
 
@@ -103,7 +103,7 @@ export function UIProvider({ children }) {
     <UIContext.Provider value={{ toast, confirm }}>
       {children}
       <div
-        className="pointer-events-none fixed bottom-4 right-4 z-[70] flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2 print:hidden"
+        className="pointer-events-none fixed right-3 top-3 z-[70] flex w-[calc(100vw-1.5rem)] max-w-xs flex-col gap-1.5 print:hidden"
         aria-live="polite"
       >
         {toasts.map((t) => {
@@ -112,7 +112,7 @@ export function UIProvider({ children }) {
             <div
               key={t.id}
               role="status"
-              className={`pointer-events-auto flex items-start gap-3 rounded-lg border px-3 py-2 text-[13px] shadow-lg ${tones[t.type]}`}
+              className={`labos-toast pointer-events-auto flex items-start gap-2 rounded-lg border px-2.5 py-1.5 text-[12px] shadow-lg ${tones[t.type]}`}
             >
               <Icon size={18} className="mt-0.5 shrink-0" />
               <p className="flex-1">{t.message}</p>
@@ -440,6 +440,7 @@ export function Select({
   disabled,
   required,
   searchable = true,
+  onSearch, // optional: server-side search; the list is then supplied by the caller and not filtered here
   size: _size, // native listbox size is ignored
   multiple: _multiple,
   ...rest
@@ -455,8 +456,8 @@ export function Select({
   const cur = options.find((o) => o.value === String(value ?? ""));
   const shown = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return t ? options.filter((o) => o.label.toLowerCase().includes(t)) : options;
-  }, [options, q]);
+    return t && !onSearch ? options.filter((o) => o.label.toLowerCase().includes(t)) : options;
+  }, [options, q, onSearch]);
 
   const place = useCallback(() => {
     const r = btnRef.current?.getBoundingClientRect();
@@ -560,7 +561,7 @@ export function Select({
                 <input
                   ref={searchRef}
                   value={q}
-                  onChange={(e) => { setQ(e.target.value); setHi(0); }}
+                  onChange={(e) => { setQ(e.target.value); setHi(0); onSearch?.(e.target.value); }}
                   placeholder="Search..."
                   className="h-7 w-full rounded border border-slate-200 pl-7 pr-2 text-xs outline-none focus:border-slate-400 focus:shadow-[0_2px_8px_-2px_rgba(15,23,42,0.18)]"
                 />

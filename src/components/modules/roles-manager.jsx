@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Lock, Pencil, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { Eye, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/client";
 import { Badge, Button, EmptyState, ErrorState, Field, FormError, Modal, PageHeader, Spinner, inputClass, useConfirm, useToast } from "@/components/ui";
 
@@ -11,6 +13,12 @@ export default function RolesManager() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  useEffect(() => { // sidebar "Add New Role" opens the create form
+    if (sp.get("new") === "1") { setEditing({}); router.replace(pathname, { scroll: false }); }
+  }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(() => {
     api("/api/roles").then((d) => { setError(""); setData(d); }).catch((e) => setError(e.message));
@@ -25,16 +33,17 @@ export default function RolesManager() {
   return (
     <div>
       <PageHeader title="Roles & Permissions"
-        actions={data && !data.needsOrganization && <Button onClick={() => setEditing({})}><Plus size={16} /> New role</Button>} />
-      {error ? <ErrorState message={error} onRetry={load} /> : !data ? <Spinner /> : data.needsOrganization ? (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Select an organization in the top bar to manage its roles.</p>
-      ) : data.items.length === 0 ? <div className="rounded-2xl border border-slate-200 bg-white"><EmptyState title="No roles yet" message="Create roles such as Receptionist, Lab Technician or Pathologist." /></div> : (
+        actions={data && <Button onClick={() => setEditing({})}><Plus size={16} /> New role</Button>} />
+      {error ? <ErrorState message={error} onRetry={load} /> : !data ? <Spinner /> : data.items.length === 0 ? <div className="rounded-2xl border border-slate-200 bg-white"><EmptyState title="No roles yet" message="Create roles such as Receptionist, Lab Technician or Pathologist." /></div> : (
         <div className="grid gap-4 md:grid-cols-2">
           {data.items.map((r) => (
-            <div key={r.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div key={r.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
               <div className="flex items-start justify-between gap-3">
-                <div><p className="flex items-center gap-2 font-semibold text-slate-900">{r.name.replace(/_/g, " ")} {r.isSystem && <Badge tone="gray"><Lock size={10} className="mr-1" /> System</Badge>}</p><p className="mt-0.5 text-xs text-slate-500">{r.description || (r.isSystem ? "Full access within its scope. Cannot be modified." : "No description")}</p></div>
-                {!r.isSystem && <div className="flex gap-1"><Button variant="ghost" size="icon" aria-label="Edit role" onClick={() => setEditing(r)}><Pencil size={15} /></Button><Button variant="ghost" size="icon" aria-label="Delete role" className="text-rose-500" onClick={() => remove(r)}><Trash2 size={15} /></Button></div>}
+                <div><p className="flex items-center gap-2 font-semibold text-slate-900">{r.name.replace(/_/g, " ")} {r.organizationName && <Badge tone="gray">{r.organizationName}</Badge>} <Badge tone={r.branchId ? "violet" : "blue"}>{r.branchId ? (r.branchName || "Branch") : "All branches"}</Badge> {r.isSystem && <Badge tone="gray"><Lock size={10} className="mr-1" /> System</Badge>}</p><p className="mt-0.5 text-xs text-slate-500">{r.description || (r.isSystem ? "Full access within its scope. Cannot be modified." : "No description")}</p></div>
+                <div className="flex gap-1">
+                  <Link href={`/roles/${r.id}`} aria-label="View role" title="View" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100"><Eye size={15} /></Link>
+                  {r.editable && <><Button variant="ghost" size="icon" aria-label="Edit role" onClick={() => setEditing(r)}><Pencil size={15} /></Button><Button variant="ghost" size="icon" aria-label="Delete role" className="text-rose-500" onClick={() => remove(r)}><Trash2 size={15} /></Button></>}
+                </div>
               </div>
               <p className="mt-3 text-xs text-slate-500">{r.users} staff · {r.isSystem ? "all permissions" : `${r.permissions.length} permissions`}</p>
               {!r.isSystem && <div className="mt-2 flex flex-wrap gap-1">{r.permissions.slice(0, 8).map((p) => <Badge key={p} tone="blue">{p}</Badge>)}{r.permissions.length > 8 && <Badge>+{r.permissions.length - 8}</Badge>}</div>}
@@ -55,6 +64,23 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
   const [perms, setPerms] = useState(new Set(role.permissions || []));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // ---- who is the role for? (Super: organization + branch, Org admin: branch, Branch admin: fixed) ----
+  const [opts, setOpts] = useState(null);
+  const [orgId, setOrgId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  useEffect(() => {
+    if (!isNew) return;
+    api("/api/scope").then((o) => {
+      setOpts(o);
+      if (o.role === "BRANCH_ADMIN" || o.locked) return;
+      setOrgId(o.organizationId || (o.organizations?.length === 1 ? o.organizations[0].id : ""));
+      setBranchId(o.branchId || "");
+    }).catch(() => setOpts({ organizations: [], branches: [] }));
+  }, [isNew]);
+  const isSuper = Boolean(opts) && !opts.locked && (opts.organizations || []).length > 0;
+  const branchChoices = (opts?.branches || []).filter(
+    (b) => b.status === "ACTIVE" && (!isSuper || (orgId && orgId !== "ALL" && b.organizationId === orgId)),
+  );
   const toggle = (k) => setPerms((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   async function submit(e) {
@@ -62,7 +88,9 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
     if (saving) return;
     setSaving(true); setError("");
     try {
-      await api(isNew ? "/api/roles" : `/api/roles/${role.id}`, { method: isNew ? "POST" : "PATCH", body: { name, description, permissions: [...perms] } });
+      await api(isNew ? "/api/roles" : `/api/roles/${role.id}`, { method: isNew ? "POST" : "PATCH", body: isNew
+          ? { name, description, permissions: [...perms], ...(isSuper ? (orgId === "ALL" ? { applyToAll: true } : { organizationId: orgId }) : {}), ...(opts?.locked ? {} : { branchId: orgId === "ALL" ? null : branchId || null }) }
+          : { name, description, permissions: [...perms] } });
       toast.success(isNew ? "Role created." : "Role updated.");
       onSaved();
     } catch (err) { setError(err.message); } finally { setSaving(false); }
@@ -77,6 +105,31 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
           <Field label="Role name" required><input required value={name} maxLength={60} onChange={(e) => setName(e.target.value)} className={inputClass} /></Field>
           <Field label="Description"><input value={description} maxLength={200} onChange={(e) => setDescription(e.target.value)} className={inputClass} /></Field>
         </div>
+        {isNew && opts && (
+          <div className="grid gap-4 rounded-xl border border-blue-100 bg-blue-50/50 p-3 sm:grid-cols-2">
+            {opts.locked ? (
+              <p className="text-sm text-slate-700 sm:col-span-2">This role will be created <b>only for your branch</b> ({branchChoices[0]?.name || "assigned branch"}).</p>
+            ) : (
+              <>
+                {isSuper && (
+                  <Field label="Organization" required>
+                    <select value={orgId} onChange={(e) => { setOrgId(e.target.value); setBranchId(""); }} className={inputClass} required>
+                      <option value="">Select organization…</option>
+                      <option value="ALL">All organizations</option>
+                      {opts.organizations.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </select>
+                  </Field>
+                )}
+                <Field label="Applies to" hint={orgId === "ALL" ? "Created for every branch of every organization." : "All branches, or one branch only."}>
+                  <select value={orgId === "ALL" ? "" : branchId} disabled={orgId === "ALL" || (isSuper && !orgId)} onChange={(e) => setBranchId(e.target.value)} className={inputClass}>
+                    <option value="">All branches</option>
+                    {branchChoices.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                </Field>
+              </>
+            )}
+          </div>
+        )}
         <div className="overflow-hidden rounded-xl border border-slate-200">
           <table className="w-full text-sm"><thead className="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-3 py-2 text-left">Module</th><th className="px-3 py-2">View</th><th className="px-3 py-2">Manage</th></tr></thead>
             <tbody className="divide-y divide-slate-100">{groups.map((g) => {

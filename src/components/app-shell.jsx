@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Bell } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getPageContext, scopeWhere } from "@/lib/scope";
 import { buildNav, buildQuick } from "@/lib/nav";
 import ProfileMenu from "@/components/profile-menu";
 import QuickAdd from "@/components/quick-add";
 import Sidebar from "@/components/sidebar";
+import NotificationBell from "@/components/notification-bell";
+import SessionKeepAlive from "@/components/session-keepalive";
 import ScopeSelector from "@/components/scope-selector";
 import { UIProvider } from "@/components/ui";
 import { memo } from "@/lib/memo";
@@ -53,6 +54,7 @@ export default async function AppShell({ children }) {
 
   return (
     <UIProvider>
+      <SessionKeepAlive />
       <div className="flex h-screen min-w-0 max-w-full overflow-hidden bg-slate-100 print:block print:h-auto print:overflow-visible">
         <Sidebar items={nav} unread={unread} roleLabel={ROLE_LABEL[actor.role]} />
         <div className="flex min-w-0 max-w-full flex-1 flex-col overflow-x-clip print:block">
@@ -75,19 +77,7 @@ export default async function AppShell({ children }) {
               {actor.role === "BRANCH_ADMIN" && (
                 <ScopeSelector locked branchName={branch?.name} />
               )}
-              <Link
-                href="/notifications"
-                aria-label="Notifications"
-                title="Notifications"
-                className="relative rounded-md border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50"
-              >
-                <Bell size={15} />
-                {unread > 0 && (
-                  <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
-                    {unread > 99 ? "99+" : unread}
-                  </span>
-                )}
-              </Link>
+              <NotificationBell unread={unread} />
               <ProfileMenu
                 name={actor.name}
                 roleLabel={actor.role === "SUPER_ADMIN" ? "Super Admin" : actor.role === "ORGANIZATION_ADMIN" ? "Organization Admin" : "Branch Admin"}

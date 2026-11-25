@@ -6,14 +6,14 @@ import { useEffect, useState } from "react";
 import {
   BarChart3, Bell, Boxes, Building2, ChevronDown, ChevronsLeft, ChevronsRight, ClipboardList, Circle,
   DatabaseBackup, Droplets, FileText, FlaskConical, GitBranch, LayoutDashboard, Menu, PanelLeftClose,
-  Receipt, Settings, ShieldCheck, ShoppingCart, SlidersHorizontal, Stethoscope, TestTube, Truck,
+  Receipt, Search, Settings, ShieldCheck, ShoppingCart, SlidersHorizontal, Stethoscope, TestTube, Truck,
   UserCog, Users, Wallet, X,
 } from "lucide-react";
 
 // Only the icons the menu really uses are bundled (importing "* as Icons" ships ~1500 icons).
 export const ICONS = {
   BarChart3, Bell, Boxes, Building2, ClipboardList, DatabaseBackup, Droplets, FileText, FlaskConical,
-  GitBranch, LayoutDashboard, Receipt, Settings, ShieldCheck, ShoppingCart, SlidersHorizontal,
+  GitBranch, LayoutDashboard, Receipt, Search, Settings, ShieldCheck, ShoppingCart, SlidersHorizontal,
   Stethoscope, TestTube, Truck, UserCog, Users, Wallet,
 };
 
@@ -23,7 +23,8 @@ export default function Sidebar({ items, unread, roleLabel }) {
   const pathname = usePathname();
   const [mode, setMode] = useState("expanded");
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState({});
+  const [openGroup, setOpenGroup] = useState(null); // only one dropdown open at a time
+  const [navQuery, setNavQuery] = useState("");
 
   useEffect(() => {
     try {
@@ -36,23 +37,27 @@ export default function Sidebar({ items, unread, roleLabel }) {
     try { localStorage.setItem(KEY, next); } catch { /* ignore */ }
   }
 
-  const isActive = (href) => {
-    if (href.endsWith("/dashboard")) return pathname === href;
+  // Items with a query string (e.g. "?new=1") open a create form and are never highlighted.
+  const isActive = (item) => {
+    const href = item.href;
+    if (href.includes("?")) return false;
+    if (item.exact || href.endsWith("/dashboard")) return pathname === href;
     return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   function Leaf({ item, compact, nested }) {
-    const Icon = ICONS[item.icon] || Circle;
-    const active = isActive(item.href);
+    const Icon = nested ? Circle : ICONS[item.icon] || Circle;
+    const active = isActive(item);
     return (
       <Link
+        key={item.href + item.label}
         href={item.href}
         onClick={() => setMobileOpen(false)}
         title={compact ? item.label : undefined}
         aria-label={item.label}
-        className={`group relative flex items-center rounded-md text-[13px] font-medium transition ${compact ? "mx-auto h-8 w-8 justify-center" : `gap-2.5 px-2.5 py-1.5 ${nested ? "ml-4" : ""}`} ${active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+        className={`group relative flex items-center rounded-md text-[13px] font-medium transition ${compact ? "mx-auto h-8 w-8 justify-center" : `gap-2.5 px-2.5 ${nested ? "ml-5 py-1 text-[12px]" : "py-1.5"}`} ${active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
       >
-        <Icon size={compact ? 16 : 15} className="shrink-0" />
+        <Icon size={nested ? 6 : compact ? 16 : 15} className={`shrink-0 ${nested ? "fill-current" : ""}`} />
         {!compact && <span className="flex-1 truncate">{item.label}</span>}
         {item.href === "/notifications" && unread > 0 && (
           compact
@@ -69,35 +74,56 @@ export default function Sidebar({ items, unread, roleLabel }) {
   }
 
   function Nav({ compact }) {
+    const needle = navQuery.trim().toLowerCase();
+    const matches = (item) => !needle || item.label.toLowerCase().includes(needle) || (item.group || "").toLowerCase().includes(needle);
     return (
       <nav className="scroll-dark flex-1 space-y-0.5 overflow-y-auto overflow-x-visible px-2 py-2" aria-label="Main navigation">
+        {!compact && (
+          <div className="relative mb-1.5">
+            <Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              value={navQuery}
+              onChange={(e) => setNavQuery(e.target.value)}
+              placeholder="Search menu..."
+              aria-label="Search menu"
+              className="h-7 w-full rounded-md border border-white/10 bg-white/5 pl-7 pr-2 text-[12px] text-slate-200 placeholder:text-slate-500 focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+        )}
         {items.map((item, i) => {
           if (item.section)
             return compact
               ? <hr key={i} className="mx-2 my-2 border-white/10" />
-              : <p key={i} className="px-2.5 pb-0.5 pt-3 text-[9px] font-bold uppercase tracking-widest text-slate-500">{item.section}</p>;
+              : needle ? null : <p key={i} className="px-2.5 pb-0.5 pt-3 text-[9px] font-bold uppercase tracking-widest text-slate-500">{item.section}</p>;
           if (item.children) {
-            if (compact) return item.children.map((c) => <Leaf key={c.href} item={c} compact />);
+            if (compact) return item.children.map((c) => Leaf({ item: { ...c, icon: item.icon }, compact: true }));
             const Icon = ICONS[item.icon] || Circle;
-            const hasActive = item.children.some((c) => isActive(c.href));
-            const open = openGroups[item.group] ?? hasActive;
+            const kids = needle && !matches(item) ? item.children.filter(matches) : item.children;
+            if (needle && kids.length === 0) return null;
+            const hasActive = item.children.some((c) => isActive(c));
+            const open = needle ? true : (openGroup === item.group || (openGroup === null && hasActive));
             return (
               <div key={item.group}>
                 <button
                   type="button"
-                  onClick={() => setOpenGroups((s) => ({ ...s, [item.group]: !open }))}
+                  onClick={() => setOpenGroup(open ? "" : item.group)}
                   aria-expanded={open}
                   className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] font-medium transition hover:bg-white/10 hover:text-white ${hasActive ? "text-white" : "text-slate-300"}`}
                 >
                   <Icon size={15} className="shrink-0" />
                   <span className="flex-1 truncate text-left">{item.group}</span>
-                  <ChevronDown size={13} className={`transition ${open ? "rotate-180" : ""}`} />
+                  <ChevronDown size={13} className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
                 </button>
-                {open && item.children.map((c) => <Leaf key={c.href} item={c} nested />)}
+                <div className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`} inert={!open}>
+                  <div className="overflow-hidden">
+                    {kids.map((c) => Leaf({ item: c, nested: true }))}
+                  </div>
+                </div>
               </div>
             );
           }
-          return <Leaf key={item.href + item.label} item={item} compact={compact} />;
+          if (!matches(item)) return null;
+          return Leaf({ item, compact });
         })}
       </nav>
     );
@@ -125,7 +151,7 @@ export default function Sidebar({ items, unread, roleLabel }) {
             <button type="button" onClick={() => update("expanded")} aria-label="Expand sidebar" title="Expand" className="mx-auto flex h-7 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-white/10 hover:text-white"><ChevronsRight size={16} /></button>
           </div>
         )}
-        <Nav compact={compact} />
+        {Nav({ compact })}
         {compact && (
           <div className="shrink-0 space-y-1 border-t border-white/10 p-2">
             <button type="button" onClick={() => update("hidden")} aria-label="Hide sidebar" title="Hide sidebar" className="mx-auto flex h-8 w-8 items-center justify-center rounded-md text-slate-400 hover:bg-white/10 hover:text-white"><PanelLeftClose size={16} /></button>
@@ -142,7 +168,7 @@ export default function Sidebar({ items, unread, roleLabel }) {
 
   return (
     <>
-      {mode !== "hidden" && <div className="hidden shrink-0 lg:block print:hidden"><Panel compact={mode === "collapsed"} /></div>}
+      {mode !== "hidden" && <div className="hidden shrink-0 lg:block print:hidden">{Panel({ compact: mode === "collapsed" })}</div>}
       <button
         onClick={() => (window.matchMedia("(min-width: 1024px)").matches ? update("expanded") : setMobileOpen(true))}
         aria-label="Open menu"
@@ -153,7 +179,7 @@ export default function Sidebar({ items, unread, roleLabel }) {
       </button>
       {mobileOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden print:hidden">
-          <div className="h-full"><Panel mobile /></div>
+          <div className="h-full">{Panel({ mobile: true })}</div>
           <button aria-label="Close menu" className="flex-1 bg-slate-950/50" onClick={() => setMobileOpen(false)} />
         </div>
       )}

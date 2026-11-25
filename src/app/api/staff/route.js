@@ -77,7 +77,7 @@ export async function POST(request) {
     if (resolved.error) return resolved.error;
     const { organizationId, branchId } = resolved.target;
 
-    const role = await prisma.role.findFirst({ where: { id: parsed.data.roleId, organizationId, name: { notIn: ADMIN_ROLE_NAMES } }, select: { id: true } });
+    const role = await prisma.role.findFirst({ where: { id: parsed.data.roleId, organizationId, name: { notIn: ADMIN_ROLE_NAMES }, OR: [{ branchId: null }, { branchId }] }, select: { id: true } });
     if (!role) return fail("Role not found.", 404);
 
     const unusable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);

@@ -44,14 +44,14 @@ export function createCrud(cfg) {
       if (q && searchFields.length) {
         and.push({ OR: searchFields.map((f) => ({ [f]: { contains: q, mode: "insensitive" } })) });
       }
-      if (filters) and.push(...filters(sp));
+      if (filters) and.push(...(await filters(sp, scope)));
       const where = { AND: and };
 
       const [items, total] = await Promise.all([
         db().findMany({ where, orderBy, skip, take, include }),
         db().count({ where }),
       ]);
-      const more = extra ? await extra(where) : {};
+      const more = extra ? await extra(where, scope) : {};
       return json({ items, total, page, pageSize, ...more });
     } catch (error) {
       return handleError(error, `${label} list`);

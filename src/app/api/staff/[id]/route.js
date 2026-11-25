@@ -21,7 +21,7 @@ async function findStaff(actor, id) {
       ...(actor.role === "BRANCH_ADMIN" ? { memberships: { some: { branchId: actor.branchId } } } : {}),
       userRoles: { some: { role: { name: { notIn: ADMIN_ROLE_NAMES } } } },
     },
-    select: { id: true, organizationId: true },
+    select: { id: true, organizationId: true, memberships: { select: { branchId: true } } },
   });
 }
 
@@ -38,7 +38,7 @@ export async function PATCH(request, { params }) {
 
     await prisma.$transaction(async (tx) => {
       if (roleId) {
-        const role = await tx.role.findFirst({ where: { id: roleId, organizationId: staff.organizationId, name: { notIn: ADMIN_ROLE_NAMES } }, select: { id: true } });
+        const role = await tx.role.findFirst({ where: { id: roleId, organizationId: staff.organizationId, name: { notIn: ADMIN_ROLE_NAMES }, OR: [{ branchId: null }, { branchId: { in: staff.memberships.map((m) => m.branchId) } }] }, select: { id: true } });
         if (!role) throw Object.assign(new Error("ROLE"), { code: "P2025" });
         await tx.userRole.deleteMany({ where: { userId: staff.id } });
         await tx.userRole.create({ data: { organizationId: staff.organizationId, userId: staff.id, roleId } });

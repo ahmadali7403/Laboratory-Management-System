@@ -107,6 +107,7 @@ model Branch {
   @@unique([organizationId, code])
   @@unique([id, organizationId])
   @@index([organizationId, status])
+  roles Role[]
 }
 
 model User {
@@ -149,6 +150,7 @@ model BranchMembership {
 model Role {
   id             String   @id @default(uuid()) @db.Uuid
   organizationId String   @db.Uuid
+  branchId       String?  @db.Uuid // null = organization-wide role; set = role exists only in that branch
   name           String
   description    String?
   isSystem       Boolean  @default(false)
@@ -156,11 +158,13 @@ model Role {
   updatedAt      DateTime @updatedAt
 
   organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch       Branch?         @relation(fields: [branchId], references: [id], onDelete: Cascade)
   userRoles    UserRole[]
   permissions  RolePermission[]
 
-  @@unique([organizationId, name])
+  @@unique([organizationId, branchId, name])
   @@unique([id, organizationId])
+  @@index([organizationId, branchId])
 }
 
 model Permission {

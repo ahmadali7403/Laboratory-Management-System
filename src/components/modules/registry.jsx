@@ -9,13 +9,14 @@ import { api, formatDate, formatDateTime, formatMoney } from "@/lib/client";
 import { NewOrderDialog, NewPurchaseDialog, OrderDetailDialog, PaymentDialog, ResultDialog } from "./lab-dialogs";
 
 const opts = (arr) => arr.map((v) => (Array.isArray(v) ? { value: v[0], label: v[1] } : { value: v, label: v }));
+const eye = (mod) => ({ label: "View", icon: Eye, href: (r) => `/view/${mod}/${r.id}` });
 const branchCell = (r) => r.branch?.name || <Badge tone="violet">All branches</Badge>;
 const orgWideEdit = (row, scope) => scope.role !== "BRANCH_ADMIN" || row.branchId !== null;
 const age = (dob) => (dob ? `${Math.max(0, Math.floor((Date.now() - new Date(dob)) / 3.156e10))}y` : "—");
 
 const CONFIGS = {
   patients: () => ({
-    title: "Patients", singular: "Patient", plural: "patients", endpoint: "/api/patients", searchPlaceholder: "Search by name, MRN, phone or CNIC...",
+    title: "Patients", singular: "Patient", plural: "patients", endpoint: "/api/patients", rowActions: [eye("patients")], searchPlaceholder: "Search by name, MRN, phone or CNIC...",
     columns: [
       { label: "MRN", render: (r) => <span className="font-mono text-xs font-semibold text-slate-600">{r.mrn}</span> },
       { label: "Patient", render: (r) => <div><p className="font-semibold text-slate-800">{r.name}{r.isWalkIn && <Badge tone="violet" className="ml-2">Walk-in</Badge>}</p><p className="text-xs text-slate-400">{r.gender} · {age(r.dateOfBirth)}</p></div> },
@@ -34,7 +35,7 @@ const CONFIGS = {
     ] },
   }),
   doctors: () => ({
-    title: "Doctors", singular: "Doctor", plural: "doctors", endpoint: "/api/doctors", canEditRow: orgWideEdit,
+    title: "Doctors", singular: "Doctor", plural: "doctors", endpoint: "/api/doctors", rowActions: [eye("doctors")], canEditRow: orgWideEdit,
     columns: [
       { label: "Name", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> },
       { label: "Specialization", key: "specialization" }, { label: "Phone", key: "phone" },
@@ -47,7 +48,7 @@ const CONFIGS = {
     ] },
   }),
   tests: () => ({
-    title: "Test Catalog", singular: "Test", plural: "tests", endpoint: "/api/tests", canEditRow: orgWideEdit, searchPlaceholder: "Search by name, code or category...",
+    title: "Test Catalog", singular: "Test", plural: "tests", endpoint: "/api/tests", rowActions: [eye("tests")], canEditRow: orgWideEdit, searchPlaceholder: "Search by name, code or category...",
     columns: [
       { label: "Code", render: (r) => <span className="font-mono text-xs font-semibold">{r.code}</span> },
       { label: "Test", render: (r) => <div><p className="font-semibold text-slate-800">{r.name}</p><p className="text-xs text-slate-400">{r.category || "—"}</p></div> },
@@ -75,7 +76,7 @@ const CONFIGS = {
     ] },
   }),
   suppliers: () => ({
-    title: "Suppliers", singular: "Supplier", plural: "suppliers", endpoint: "/api/suppliers", canEditRow: orgWideEdit,
+    title: "Suppliers", singular: "Supplier", plural: "suppliers", endpoint: "/api/suppliers", rowActions: [eye("suppliers")], canEditRow: orgWideEdit,
     columns: [
       { label: "Supplier", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> }, { label: "Contact", key: "contactPerson" },
       { label: "Phone", key: "phone" }, { label: "Available to", render: branchCell }, { label: "Status", render: (r) => <StatusBadge value={r.isActive ? "ACTIVE" : "INACTIVE"} /> },
@@ -87,7 +88,7 @@ const CONFIGS = {
     ] },
   }),
   inventory: () => ({
-    title: "Inventory", singular: "Inventory item", plural: "inventory items", endpoint: "/api/inventory",
+    title: "Inventory", singular: "Inventory item", plural: "inventory items", endpoint: "/api/inventory", rowActions: [eye("inventory")],
     columns: [
       { label: "Item", render: (r) => <div><p className="font-semibold text-slate-800">{r.name}</p><p className="text-xs text-slate-400">{r.sku || ""}</p></div> },
       { label: "In stock", render: (r) => { const low = Number(r.reorderLevel) > 0 && Number(r.quantity) <= Number(r.reorderLevel); return <span className={low ? "font-bold text-rose-600" : ""}>{Number(r.quantity)} {r.unit}{low && <Badge tone="red" className="ml-2">Low</Badge>}</span>; } },
@@ -102,7 +103,7 @@ const CONFIGS = {
     ] },
   }),
   expenses: () => ({
-    title: "Expenses", singular: "Expense", plural: "expenses", endpoint: "/api/expenses", searchPlaceholder: "Search category or description...",
+    title: "Expenses", singular: "Expense", plural: "expenses", endpoint: "/api/expenses", rowActions: [eye("expenses")], searchPlaceholder: "Search category or description...",
     columns: [
       { label: "Date", render: (r) => formatDate(r.expenseDate) }, { label: "Category", render: (r) => <span className="font-semibold text-slate-800">{r.category}</span> },
       { label: "Description", key: "description" }, { label: "Method", render: (r) => String(r.paymentMethod || "CASH").replace("_", " ") },
@@ -158,7 +159,18 @@ function OrdersView({ scope, mode }) {
       ...base, title: "Laboratory Reports", baseParams: { status: "COMPLETED" },
       columns: [...base.columns.slice(0, 3), { label: "Completed", render: (r) => formatDateTime(r.completedAt) }],
       rowActions: [
+        eye("orders"),
         { label: "Open report", icon: FileText, variant: "primary", href: (r) => `/reports/${r.id}` },
+      ],
+    };
+    if (mode === "pay") return {
+      ...base, title: "Pay Bill", baseParams: { paymentStatus: "OPEN" },
+      columns: [...base.columns.slice(0, 3), { label: "Total", render: (r) => formatMoney(r.total) }, { label: "Paid", render: (r) => formatMoney(r.paidAmount) },
+        { label: "Balance", render: (r) => <b className="text-rose-600">{formatMoney(Number(r.total) - Number(r.paidAmount))}</b> }, { label: "Payment", render: (r) => <StatusBadge value={r.paymentStatus} /> }],
+      filters: [{ key: "paymentStatus", label: "Unpaid + partial", options: opts([["UNPAID", "Unpaid"], ["PARTIAL", "Partial"]]) }],
+      rowActions: [
+        eye("orders"),
+        { label: "Pay", icon: ReceiptText, variant: "primary", show: (r) => r.status !== "CANCELLED" && Number(r.total) > Number(r.paidAmount), onClick: (r) => setPayOrder(r) },
       ],
     };
     if (mode === "invoices") return {
@@ -167,6 +179,7 @@ function OrdersView({ scope, mode }) {
         { label: "Balance", render: (r) => <b className={Number(r.total) > Number(r.paidAmount) ? "text-rose-600" : ""}>{formatMoney(Number(r.total) - Number(r.paidAmount))}</b> }, { label: "Payment", render: (r) => <StatusBadge value={r.paymentStatus} /> }],
       filters: [{ key: "paymentStatus", label: "All payments", options: opts([["UNPAID", "Unpaid"], ["PARTIAL", "Partial"], ["PAID", "Paid"]]) }],
       rowActions: [
+        eye("orders"),
         { label: "Pay", icon: ReceiptText, variant: "primary", show: (r) => r.status !== "CANCELLED" && Number(r.total) > Number(r.paidAmount), onClick: (r) => setPayOrder(r) },
         { label: "Invoice", icon: Printer, show: (r) => r.status !== "CANCELLED", href: (r) => `/billing/${r.id}` },
       ],
@@ -175,7 +188,7 @@ function OrdersView({ scope, mode }) {
       ...base, title: "Laboratory Orders", createLabel: "New order",
       filters: [{ key: "status", label: "All statuses", options: opts(["REGISTERED", "SAMPLE_COLLECTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"].map((s) => [s, s.replace(/_/g, " ")])) },
         { key: "paymentStatus", label: "All payments", options: opts([["UNPAID", "Unpaid"], ["PARTIAL", "Partial"], ["PAID", "Paid"]]) }],
-      rowActions: [{ label: "View", icon: Eye, onClick: (r) => setDetailId(r.id) }],
+      rowActions: [eye("orders")],
       headerActions: () => <Button onClick={() => setNewOpen(true)}><Plus size={16} /> New order</Button>,
     };
   }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -205,8 +218,9 @@ function PaymentsView({ scope }) {
   return <DataModule config={config} scope={scope} />;
 }
 
-function BillingView({ scope }) {
+function BillingView({ scope, variant }) {
   const [tab, setTab] = useState("invoices");
+  if (variant === "pay") return <OrdersView scope={scope} mode="pay" />;
   return (
     <div>
       <div className="mb-4 inline-flex rounded-xl border border-slate-200 bg-white p-1 text-sm font-semibold">
@@ -219,7 +233,15 @@ function BillingView({ scope }) {
   );
 }
 
-function SamplesView({ scope }) {
+const SAMPLE_VARIANTS = {
+  collect: { title: "Collect Sample", status: "PENDING", actions: ["collect"] },
+  receive: { title: "Receive Sample", status: "COLLECTED", actions: ["receive"] },
+  reject: { title: "Reject Sample", status: null, actions: ["reject", "reset"], notStatus: true },
+  list: { title: "Sample List", status: null, actions: ["collect", "receive", "reject", "reset"] },
+};
+
+function SamplesView({ scope, variant }) {
+  const V = SAMPLE_VARIANTS[variant] || SAMPLE_VARIANTS.list;
   const toast = useToast();
   const confirm = useConfirm();
   const [reason, setReason] = useState(null);
@@ -228,8 +250,9 @@ function SamplesView({ scope }) {
     catch (e) { toast.error(e.message); }
   }
   const config = {
-    title: "Sample Collection", singular: "Sample", plural: "samples", endpoint: "/api/samples", searchPlaceholder: "Search sample, order, patient or MRN...",
-    filters: [{ key: "status", label: "All statuses", options: opts(["PENDING", "COLLECTED", "RECEIVED", "REJECTED"]) }],
+    title: V.title, singular: "Sample", plural: "samples", endpoint: "/api/samples", searchPlaceholder: "Search patient name, MRN, phone, order or sample no...",
+    baseParams: V.status ? { status: V.status } : undefined,
+    filters: V.status ? [] : [{ key: "status", label: "All statuses", options: opts(["PENDING", "COLLECTED", "RECEIVED", "REJECTED"]) }],
     columns: [
       { label: "Sample", render: (r) => <span className="font-mono text-xs font-semibold text-blue-700">{r.sampleNo}</span> },
       { label: "Type", key: "sampleType" }, { label: "Patient", render: (r) => <div><p className="font-semibold text-slate-800">{r.order.patient.name}</p><p className="text-xs text-slate-400">{r.order.patient.mrn}</p></div> },
@@ -238,15 +261,18 @@ function SamplesView({ scope }) {
       { label: "Collected", render: (r) => (r.collectedAt ? `${formatDateTime(r.collectedAt)}` : "—") },
     ],
     rowActions: [
+      eye("samples"),
       { label: "Collect", icon: Droplet, variant: "primary", show: (r) => r.status === "PENDING", onClick: (r, c) => act(r, c, "collect") },
       { label: "Receive", icon: Check, variant: "success", show: (r) => r.status === "COLLECTED", onClick: (r, c) => act(r, c, "receive") },
       { label: "Reject", icon: XCircle, variant: "secondary", show: (r) => ["PENDING", "COLLECTED", "RECEIVED"].includes(r.status), onClick: (r, c) => setReason({ row: r, ctx: c }) },
       { label: "Re-collect", icon: RotateCcw, show: (r) => r.status === "REJECTED", onClick: async (r, c) => { if (await confirm({ title: "Re-collect sample", message: "Reset this rejected sample so it can be collected again?", confirmLabel: "Reset" })) act(r, c, "reset"); } },
     ],
   };
+  const keep = { Collect: "collect", Receive: "receive", Reject: "reject", "Re-collect": "reset" };
+  config.rowActions = config.rowActions.filter((a) => a.label === "View" || V.actions.includes(keep[a.label]));
   return (
     <>
-      <DataModule config={config} scope={scope} />
+      <DataModule key={variant || "list"} config={config} scope={scope} />
       {reason && <RejectDialog onClose={() => setReason(null)} onSubmit={async (text) => { await act(reason.row, reason.ctx, "reject", { reason: text }); setReason(null); }} />}
     </>
   );
@@ -265,7 +291,16 @@ function RejectDialog({ onClose, onSubmit }) {
   );
 }
 
-function ResultsView({ scope }) {
+const RESULT_VARIANTS = {
+  enter: { title: "Enter Result", status: "PENDING", actions: ["Enter"] },
+  edit: { title: "Edit Result", status: "ENTERED", actions: ["Edit"] },
+  verify: { title: "Verify Result", status: "ENTERED", actions: ["Verify", "Edit"] },
+  reopen: { title: "Reopen Result", status: "VERIFIED", actions: ["Re-open"] },
+  list: { title: "Result List", status: null, actions: ["Enter", "Edit", "Verify", "Re-open"] },
+};
+
+function ResultsView({ scope, variant }) {
+  const V = RESULT_VARIANTS[variant] || RESULT_VARIANTS.list;
   const toast = useToast();
   const [editing, setEditing] = useState(null);
   const [bump, setBump] = useState(0);
@@ -274,8 +309,9 @@ function ResultsView({ scope }) {
     catch (e) { toast.error(e.message); }
   }
   const config = {
-    title: "Results", singular: "Result", plural: "results", endpoint: "/api/results", searchPlaceholder: "Search test, order, patient or MRN...",
-    filters: [{ key: "status", label: "All results", options: opts([["PENDING", "Awaiting entry"], ["ENTERED", "Awaiting verification"], ["VERIFIED", "Verified"]]) }],
+    title: V.title, singular: "Result", plural: "results", endpoint: "/api/results", searchPlaceholder: "Search patient name, MRN, test or order...",
+    baseParams: V.status ? { status: V.status } : undefined,
+    filters: V.status ? [] : [{ key: "status", label: "All results", options: opts([["PENDING", "Awaiting entry"], ["ENTERED", "Awaiting verification"], ["VERIFIED", "Verified"]]) }],
     columns: [
       { label: "Order", render: (r) => <span className="font-mono text-xs font-semibold text-blue-700">{r.order.orderNo}</span> },
       { label: "Patient", render: (r) => <div><p className="font-semibold text-slate-800">{r.order.patient.name}</p><p className="text-xs text-slate-400">{r.order.branch.name}</p></div> },
@@ -285,15 +321,17 @@ function ResultsView({ scope }) {
       { label: "Status", render: (r) => <StatusBadge value={r.resultStatus} /> },
     ],
     rowActions: [
+      eye("results"),
       { label: "Enter", icon: FlaskConical, variant: "primary", show: (r) => r.resultStatus === "PENDING", onClick: (r) => setEditing(r) },
       { label: "Edit", icon: TestTube2, show: (r) => r.resultStatus === "ENTERED", onClick: (r) => setEditing(r) },
       { label: "Verify", icon: ShieldCheck, variant: "success", show: (r) => r.resultStatus === "ENTERED", onClick: (r, c) => act(r, c, "verify") },
       { label: "Re-open", icon: RotateCcw, show: (r) => r.resultStatus === "VERIFIED", onClick: (r, c) => act(r, c, "reopen") },
     ],
   };
+  config.rowActions = config.rowActions.filter((a) => a.label === "View" || V.actions.includes(a.label));
   return (
     <>
-      <DataModule key={bump} config={config} scope={scope} />
+      <DataModule key={`${variant || "list"}-${bump}`} config={config} scope={scope} />
       {editing && <ResultDialog item={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); setBump((b) => b + 1); }} />}
     </>
   );
@@ -319,6 +357,7 @@ function PurchasesView({ scope }) {
       { label: "Total", render: (r) => formatMoney(r.total) }, { label: "Status", render: (r) => <StatusBadge value={r.status} /> },
     ],
     rowActions: [
+      eye("purchases"),
       { label: "Receive", icon: PackageCheck, variant: "success", show: (r) => r.status === "ORDERED", onClick: (r, c) => act(r, c, "receive") },
       { label: "Cancel", icon: X, show: (r) => r.status === "ORDERED", onClick: (r, c) => act(r, c, "cancel") },
     ],
@@ -338,7 +377,7 @@ function StaffView({ scope }) {
   if (roles === null) return null;
   const needsOrg = !scope.organizationId;
   const config = {
-    title: "Staff Management", singular: "Staff member", plural: "staff", endpoint: "/api/staff", searchPlaceholder: "Search by name, email or phone...",
+    title: "Staff Management", singular: "Staff member", plural: "staff", endpoint: "/api/staff", rowActions: [eye("staff")], searchPlaceholder: "Search by name, email or phone...",
     banner: () => needsOrg
       ? <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Select an organization in the top bar to add staff members.</p>
       : roles.length === 0 ? <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">No staff roles exist yet. {scope.role === "BRANCH_ADMIN" ? "Ask your organization admin to create roles." : "Create roles under Roles & Permissions first."}</p> : null,
@@ -353,7 +392,7 @@ function StaffView({ scope }) {
       toPayload: (v) => { const p = { ...v }; if (!p.email) delete p.email; return p; },
       fields: [
         { name: "name", label: "Full name", required: true, mask: "name", span: 2 },
-        { name: "roleId", label: "Role", type: "select", required: true, options: roles.map((r) => ({ value: r.id, label: r.name })), init: (row) => row.role?.id || "" },
+        { name: "roleId", label: "Role", type: "select", required: true, options: roles.map((r) => ({ value: r.id, label: r.branchName ? `${r.name} · ${r.branchName}` : `${r.name} · all branches` })), init: (row) => row.role?.id || "" },
         { name: "email", label: "Email", type: "email", span: 2 }, { name: "phone", label: "Phone", mask: "phone", maxLength: 16 },
         { name: "status", label: "Status", type: "select", required: true, default: "ACTIVE", options: opts([["ACTIVE", "Active"], ["INACTIVE", "Inactive"]]), editOnly: true },
       ],
@@ -362,13 +401,60 @@ function StaffView({ scope }) {
   return <DataModule key={`${scope.organizationId}-${roles.length}`} config={config} scope={scope} />;
 }
 
-export default function ModuleView({ name, scope }) {
+
+// ---- Inventory: list / stock alert / stock report ---------------------------
+const stockOf = (r) => (Number(r.quantity) <= 0 ? "OUT" : Number(r.reorderLevel) > 0 && Number(r.quantity) <= Number(r.reorderLevel) ? "LOW" : "NORMAL");
+const StockBadge = ({ r }) => { const k = stockOf(r); return k === "OUT" ? <Badge tone="red">Out of stock</Badge> : k === "LOW" ? <Badge tone="amber">Low stock</Badge> : <Badge tone="green">Normal</Badge>; };
+const supplierOf = (r) => r.purchaseItems?.[0]?.purchase?.supplier;
+
+function InventoryView({ scope, variant }) {
+  const [suppliers, setSuppliers] = useState([]);
+  useEffect(() => { api("/api/suppliers?pageSize=100&active=1").then((d) => setSuppliers(d.items || [])).catch(() => {}); }, [scope.organizationId, scope.branchId]);
+  const base = CONFIGS.inventory();
+  const stockFilter = { key: "stock", label: "All stock", options: opts([["OUT", "Out of stock"], ["LOW", "Low stock"], ["NORMAL", "Normal"]]) };
+  const supplierFilter = { key: "supplierId", label: "All suppliers", options: suppliers.map((x) => ({ value: x.id, label: x.name })) };
+  const supplierCol = { label: "Last supplier", render: (r) => supplierOf(r)?.name || "—" };
+  const statusCol = { label: "Stock status", render: (r) => <StockBadge r={r} /> };
+  const config = { ...base, dateRange: true, searchPlaceholder: "Search item name or code..." };
+  if (variant === "alerts") {
+    Object.assign(config, {
+      title: "Stock Alert", baseParams: { stock: "ALERT" }, canEditRow: undefined,
+      filters: [{ key: "stock", label: "Low + out of stock", options: opts([["OUT", "Out of stock"], ["LOW", "Low stock"]]) }, supplierFilter],
+      columns: [
+        { label: "Item", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> }, { label: "Code", key: "sku" },
+        { label: "Available", render: (r) => <b className={stockOf(r) === "OUT" ? "text-rose-600" : "text-amber-600"}>{Number(r.quantity)} {r.unit}</b> },
+        { label: "Minimum level", render: (r) => `${Number(r.reorderLevel)} ${r.unit}` },
+        { label: "Restock needed", render: (r) => `${Math.max(0, Number(r.reorderLevel) - Number(r.quantity))} ${r.unit}` },
+        supplierCol, statusCol, { label: "Branch", render: branchCell },
+      ],
+      footer: (d) => d?.summary && <p className="mt-2 text-right text-xs text-slate-600">Out of stock: <b>{d.summary.out}</b> · Low stock: <b>{d.summary.low}</b> (all active items in view)</p>,
+    });
+  } else if (variant === "report") {
+    Object.assign(config, {
+      title: "Stock Report", filters: [stockFilter, supplierFilter],
+      columns: [
+        { label: "Item", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> }, { label: "Code", key: "sku" },
+        { label: "In stock", render: (r) => `${Number(r.quantity)} ${r.unit}` }, { label: "Unit cost", render: (r) => (r.unitCost == null ? "—" : formatMoney(r.unitCost)) },
+        { label: "Stock value", className: "text-right", render: (r) => (r.unitCost == null ? "—" : formatMoney(Number(r.quantity) * Number(r.unitCost))) },
+        supplierCol, statusCol, { label: "Branch", render: branchCell },
+      ],
+      headerActions: () => <Button variant="secondary" onClick={() => window.print()}><Printer size={15} /> Print</Button>,
+      footer: (d) => d?.summary && <p className="mt-2 text-right text-xs text-slate-700">Active items: <b>{d.summary.items}</b> · Out: <b>{d.summary.out}</b> · Low: <b>{d.summary.low}</b> · Inventory value (items with a unit cost): <b>{formatMoney(d.summary.value)}</b>{d.summary.noCost > 0 && <> · <span className="text-amber-700">{d.summary.noCost} item(s) have no unit cost and are excluded</span></>}</p>,
+    });
+  } else {
+    Object.assign(config, { filters: [stockFilter, supplierFilter], columns: [...base.columns.slice(0, 1), base.columns[1], { label: "Code", key: "sku" }, supplierCol, statusCol, base.columns[4]] });
+  }
+  return <DataModule key={variant || "list"} config={config} scope={scope} />;
+}
+
+export default function ModuleView({ name, scope, variant }) {
   const config = useMemo(() => (CONFIGS[name] ? CONFIGS[name]() : null), [name]);
   if (name === "orders") return <OrdersView scope={scope} mode="orders" />;
   if (name === "reports") return <OrdersView scope={scope} mode="reports" />;
-  if (name === "billing") return <BillingView scope={scope} />;
-  if (name === "samples") return <SamplesView scope={scope} />;
-  if (name === "results") return <ResultsView scope={scope} />;
+  if (name === "billing") return <BillingView scope={scope} variant={variant} />;
+  if (name === "samples") return <SamplesView scope={scope} variant={variant} />;
+  if (name === "results") return <ResultsView scope={scope} variant={variant} />;
+  if (name === "inventory") return <InventoryView scope={scope} variant={variant} />;
   if (name === "purchases") return <PurchasesView scope={scope} />;
   if (name === "staff") return <StaffView scope={scope} />;
   return config ? <DataModule config={config} scope={scope} /> : null;

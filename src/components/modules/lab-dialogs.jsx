@@ -37,6 +37,7 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
   const [tests, setTests] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [patientId, setPatientId] = useState("");
+  const [pickedPatient, setPickedPatient] = useState(null);
   const [walk, setWalk] = useState(Boolean(initialWalk));
   const [wi, setWi] = useState({ name: "", fatherName: "", gender: "MALE", ageYears: "", phone: "" });
   const [referredBy, setReferredBy] = useState("");
@@ -97,7 +98,7 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
       <form id="order-form" onSubmit={submit} className="grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
           <FormError message={error} />
-          {eb.needsPick && <BranchPicker scope={scope} picked={eb.picked} onChange={(v) => { eb.setPicked(v); setPatientId(""); setSelected({}); setDoctorId(""); }} />}
+          {eb.needsPick && <BranchPicker scope={scope} picked={eb.picked} onChange={(v) => { eb.setPicked(v); setPatientId(""); setPickedPatient(null); setSelected({}); setDoctorId(""); }} />}
           <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs font-semibold">
             <button type="button" onClick={() => setWalk(false)} className={`rounded-md px-3 py-1.5 ${!walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Registered patient</button>
             <button type="button" onClick={() => setWalk(true)} className={`rounded-md px-3 py-1.5 ${walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Walk-in patient</button>
@@ -111,11 +112,14 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
               <Field label="Phone" className="col-span-2"><input value={wi.phone} maxLength={30} onChange={(e) => setWi({ ...wi, phone: e.target.value })} className={inputClass} disabled={!b} /></Field>
             </div>
           ) : (
-            <Field label="Patient" required hint={!b ? "Select a branch first." : "Search by name, MRN or phone."}>
-              <input value={patientQ} onChange={(e) => setPatientQ(e.target.value)} placeholder="Search patient..." className={`${inputClass} mb-2`} disabled={!b} />
-              <Select required={!walk} value={patientId} onChange={(e) => setPatientId(e.target.value)} className={inputClass} disabled={!b} size={Math.min(5, Math.max(2, patientList.length || 2))}>
-                {patientList.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.mrn}{p.phone ? ` · ${p.phone}` : ""}</option>)}
+            <Field label="Patient" required hint={!b ? "Select a branch first." : "Open the list and type a name, MRN or phone."}>
+              <Select required={!walk} value={patientId} onChange={(e) => { setPatientId(e.target.value); setPickedPatient(patientList.find((p) => p.id === e.target.value) || null); }} onSearch={setPatientQ} className={inputClass} disabled={!b}>
+                <option value="">Select patient...</option>
+                {[...(pickedPatient && !patientList.some((p) => p.id === pickedPatient.id) ? [pickedPatient] : []), ...patientList].map((p) => <option key={p.id} value={p.id}>{p.name} · {p.mrn}{p.phone ? ` · ${p.phone}` : ""}</option>)}
               </Select>
+              {pickedPatient && patientId === pickedPatient.id && (
+                <p className="mt-1.5 rounded-md bg-slate-50 px-2 py-1 text-[11px] text-slate-600">{pickedPatient.name} · {pickedPatient.mrn} · {pickedPatient.gender}{pickedPatient.dateOfBirth ? ` · ${Math.max(0, Math.floor((Date.now() - new Date(pickedPatient.dateOfBirth)) / 3.156e10))}y` : ""}{pickedPatient.phone ? ` · ${pickedPatient.phone}` : ""}</p>
+              )}
             </Field>
           )}
           <Field label="Referring doctor">

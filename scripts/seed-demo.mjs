@@ -197,12 +197,8 @@ async function main() {
   // Create a usable custom role and a directory entry. Staff login is intentionally not enabled by this seed.
   await prisma.permission.createMany({ data: permissionCatalog, skipDuplicates: true });
   const roleName = "DEMO_LAB_TECHNICIAN";
-  const roleBefore = await prisma.role.findUnique({ where: { organizationId_name: { organizationId, name: roleName } }, select: { id: true } });
-  const role = await prisma.role.upsert({
-    where: { organizationId_name: { organizationId, name: roleName } },
-    update: {},
-    create: { organizationId, name: roleName, description: "Demo role for sample collection and result entry." },
-  });
+  const roleBefore = await prisma.role.findFirst({ where: { organizationId, branchId: null, name: roleName }, select: { id: true } });
+  const role = roleBefore || await prisma.role.create({ data: { organizationId, name: roleName, description: "Demo role for sample collection and result entry." } });
   const allowedKeys = ["patients.view", "tests.view", "orders.view", "samples.view", "samples.manage", "results.view", "results.manage", "reports.view"];
   const permissionRows = await prisma.permission.findMany({ where: { key: { in: allowedKeys } }, select: { id: true } });
   for (const permission of permissionRows) {

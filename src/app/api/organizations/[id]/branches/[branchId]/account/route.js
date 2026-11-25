@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ensureSystemRole } from "@/lib/roles";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
@@ -204,21 +205,7 @@ export async function PATCH(request, { params }) {
       const passwordHash = await bcrypt.hash(parsed.data.password, 12);
 
       updated = await prisma.$transaction(async (tx) => {
-        const role = await tx.role.upsert({
-          where: {
-            organizationId_name: {
-              organizationId,
-              name: "BRANCH_ADMIN",
-            },
-          },
-          update: {},
-          create: {
-            organizationId,
-            name: "BRANCH_ADMIN",
-            description: "Access limited to assigned branch.",
-            isSystem: true,
-          },
-        });
+        const role = await ensureSystemRole(tx, organizationId, "BRANCH_ADMIN", "Access limited to assigned branch.");
 
         return tx.user.create({
           data: {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ensureSystemRole } from "@/lib/roles";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 
@@ -183,21 +184,7 @@ export async function POST(request, { params }) {
         });
 
         // Organization ka Branch Admin role
-        const role = await tx.role.upsert({
-          where: {
-            organizationId_name: {
-              organizationId,
-              name: "BRANCH_ADMIN",
-            },
-          },
-          update: {},
-          create: {
-            organizationId,
-            name: "BRANCH_ADMIN",
-            description: "Access limited to assigned branch.",
-            isSystem: true,
-          },
-        });
+        const role = await ensureSystemRole(tx, organizationId, "BRANCH_ADMIN", "Access limited to assigned branch.");
 
         // Branch Admin user create
         const user = await tx.user.create({

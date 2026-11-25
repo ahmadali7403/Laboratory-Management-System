@@ -27,3 +27,12 @@ export async function ensurePermissions(prisma) {
     skipDuplicates: true,
   });
 }
+
+// Keys the actor may hand out. A branch admin can never grant more than the catalogue
+// entries available to branch level (no module is organization-only today, so this is the
+// whole catalogue; keep the intersection so any future org-only key is rejected server-side).
+const ORG_ONLY_KEYS = new Set([]);
+export function grantableKeys(actor, requested) {
+  const valid = new Set(PERMISSION_CATALOG.map((p) => p.key));
+  return [...new Set(requested)].filter((k) => valid.has(k) && (actor.role !== "BRANCH_ADMIN" || !ORG_ONLY_KEYS.has(k)));
+}

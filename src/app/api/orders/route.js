@@ -23,7 +23,8 @@ export async function GET(request) {
 
     const and = [scopeWhere(scope)];
     if (STATUSES.includes(status)) and.push({ status });
-    if (PAY.includes(paymentStatus)) and.push({ paymentStatus, status: { not: "CANCELLED" } });
+    if (paymentStatus === "OPEN") and.push({ paymentStatus: { in: ["UNPAID", "PARTIAL"] }, status: { not: "CANCELLED" } });
+    else if (PAY.includes(paymentStatus)) and.push({ paymentStatus, status: { not: "CANCELLED" } });
     if (q) {
       and.push({
         OR: [

@@ -142,6 +142,14 @@ export function handleError(error, label = "API", conflictMessage) {
   }
   if (code === "P2025") return fail("Record not found.", 404);
   if (code === "P2023") return fail("Invalid ID.", 400);
+  if (code === "P2021" || code === "P2022") {
+    console.error(`${label} error:`, error);
+    return fail("The database is missing the latest changes. Run: npx prisma migrate deploy", 500);
+  }
+  if (error?.name === "PrismaClientValidationError" || error?.name === "PrismaClientInitializationError") {
+    console.error(`${label} error:`, error);
+    return fail("The Prisma client is out of date. Stop the server, run: npx prisma generate, then start it again.", 500);
+  }
   console.error(`${label} error:`, error);
   return fail("Something went wrong. Please try again.", 500);
 }

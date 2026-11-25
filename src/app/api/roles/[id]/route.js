@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_NAMES, apiContext, authorityWhere } from "@/lib/scope";
-import { PERMISSION_CATALOG, ensurePermissions } from "@/lib/permissions";
+import { ensurePermissions, grantableKeys } from "@/lib/permissions";
+import { assertRoleNameFree } from "@/lib/roles";
 import { fail, handleError, isUuid, json, opt, parseBody, req } from "@/lib/http";
 
 const schema = z.object({
@@ -15,26 +16,65 @@ async function findRole(actor, id) {
   const where = { id, name: { notIn: ADMIN_ROLE_NAMES }, isSystem: false };
   const org = authorityWhere(actor).organizationId;
   if (org) where.organizationId = org;
-  return prisma.role.findFirst({ where, select: { id: true, organizationId: true } });
+  // A branch admin can only touch roles of its own branch: never org-wide roles, never another branch's.
+  if (actor.role === "BRANCH_ADMIN") where.branchId = actor.branchId;
+  return prisma.role.findFirst({ where, select: { id: true, organizationId: true, branchId: true, name: true } });
+}
+
+export async function GET(request, { params }) {
+  try {
+    const { id } = await params;
+    const auth = await apiContext(request);
+    if (auth.error) return auth.error;
+    const actor = auth.ctx.actor;
+    if (!isUuid(id)) return fail("Role not found.", 404);
+    const where = { id };
+    const org = authorityWhere(actor).organizationId;
+    if (org) where.organizationId = org;
+    // branch admin: organization-wide roles (read only) or its own branch's roles
+    if (actor.role === "BRANCH_ADMIN") where.OR = [{ branchId: null }, { branchId: actor.branchId }];
+    const r = await prisma.role.findFirst({
+      where,
+      include: {
+        branch: { select: { id: true, name: true } },
+        permissions: { select: { permission: { select: { key: true } } } },
+        userRoles: { select: { user: { select: { id: true, name: true, email: true, status: true } } }, take: 200 },
+      },
+    });
+    if (!r) return fail("Role not found.", 404);
+    const system = r.isSystem || ADMIN_ROLE_NAMES.includes(r.name);
+    return json({
+      id: r.id, name: r.name, description: r.description, isSystem: system, branchId: r.branchId, branchName: r.branch?.name || null,
+      editable: !system && (actor.role !== "BRANCH_ADMIN" || r.branchId === actor.branchId),
+      permissions: r.permissions.map((p) => p.permission.key),
+      staff: actor.role === "BRANCH_ADMIN" && r.branchId === null ? [] : r.userRoles.map((u) => u.user),
+    });
+  } catch (error) {
+    return handleError(error, "Role detail");
+  }
 }
 
 export async function PATCH(request, { params }) {
   try {
     const { id } = await params;
-    const auth = await apiContext(request, { roles: ["SUPER_ADMIN", "ORGANIZATION_ADMIN"] });
+    const auth = await apiContext(request, { roles: ["SUPER_ADMIN", "ORGANIZATION_ADMIN", "BRANCH_ADMIN"] });
     if (auth.error) return auth.error;
     const role = await findRole(auth.ctx.actor, id);
     if (!role) return fail("Role not found or it is a protected system role.", 404);
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
     const { permissions, ...rest } = parsed.data;
+    if (rest.name && rest.name.trim().toLowerCase() !== role.name.toLowerCase()) {
+      if (ADMIN_ROLE_NAMES.includes(rest.name.trim().toUpperCase().replace(/ /g, "_"))) return fail("This role name is reserved.", 400);
+      await assertRoleNameFree(prisma, { organizationId: role.organizationId, branchId: role.branchId, name: rest.name.trim(), exceptId: role.id });
+    }
 
+    const actor = auth.ctx.actor;
     await prisma.$transaction(async (tx) => {
       if (Object.keys(rest).length) await tx.role.update({ where: { id }, data: rest });
       if (permissions) {
         await ensurePermissions(tx);
-        const valid = new Set(PERMISSION_CATALOG.map((p) => p.key));
-        const perms = await tx.permission.findMany({ where: { key: { in: permissions.filter((k) => valid.has(k)) } }, select: { id: true } });
+        const perms = await tx.permission.findMany({ where: { key: { in: grantableKeys(actor, permissions) } }, select: { id: true } });
         await tx.rolePermission.deleteMany({ where: { roleId: id } });
         await tx.rolePermission.createMany({ data: perms.map((p) => ({ roleId: id, permissionId: p.id })) });
       }
@@ -48,7 +88,7 @@ export async function PATCH(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     const { id } = await params;
-    const auth = await apiContext(request, { roles: ["SUPER_ADMIN", "ORGANIZATION_ADMIN"] });
+    const auth = await apiContext(request, { roles: ["SUPER_ADMIN", "ORGANIZATION_ADMIN", "BRANCH_ADMIN"] });
     if (auth.error) return auth.error;
     const role = await findRole(auth.ctx.actor, id);
     if (!role) return fail("Role not found or it is a protected system role.", 404);
