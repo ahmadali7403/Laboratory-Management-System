@@ -8,6 +8,7 @@ import NotificationBell from "@/components/notification-bell";
 import SessionKeepAlive from "@/components/session-keepalive";
 import ScopeSelector from "@/components/scope-selector";
 import { UIProvider } from "@/components/ui";
+import { RecordViewProvider } from "@/components/record-view";
 import { memo } from "@/lib/memo";
 
 const ROLE_LABEL = {
@@ -60,6 +61,7 @@ export default async function AppShell({ children }) {
 
   return (
     <UIProvider>
+      <RecordViewProvider>
       <SessionKeepAlive />
 
       <div className="flex h-screen min-w-0 max-w-full overflow-hidden bg-slate-100 print:block print:h-auto print:overflow-visible">
@@ -127,6 +129,7 @@ export default async function AppShell({ children }) {
           </main>
         </div>
       </div>
+      </RecordViewProvider>
     </UIProvider>
   );
 }

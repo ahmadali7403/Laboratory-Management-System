@@ -9,7 +9,8 @@ import { api, formatDate, formatDateTime, formatMoney } from "@/lib/client";
 import { NewOrderDialog, NewPurchaseDialog, OrderDetailDialog, PaymentDialog, ResultDialog } from "./lab-dialogs";
 
 const opts = (arr) => arr.map((v) => (Array.isArray(v) ? { value: v[0], label: v[1] } : { value: v, label: v }));
-const eye = (mod) => ({ label: "View", icon: Eye, href: (r) => `/view/${mod}/${r.id}` });
+// View opens a compact modal (no page navigation).
+const eye = (mod) => ({ label: "View", icon: Eye, onClick: (r, ctx) => ctx.openView(mod, r.id) });
 const branchCell = (r) => r.branch?.name || <Badge tone="violet">All branches</Badge>;
 const orgWideEdit = (row, scope) => scope.role !== "BRANCH_ADMIN" || row.branchId !== null;
 const age = (dob) => (dob ? `${Math.max(0, Math.floor((Date.now() - new Date(dob)) / 3.156e10))}y` : "—");
@@ -160,7 +161,7 @@ function OrdersView({ scope, mode }) {
       columns: [...base.columns.slice(0, 3), { label: "Completed", render: (r) => formatDateTime(r.completedAt) }],
       rowActions: [
         eye("orders"),
-        { label: "Open report", icon: FileText, variant: "primary", href: (r) => `/reports/${r.id}` },
+        { label: "Open report", icon: FileText, variant: "primary", onClick: (r, ctx) => ctx.openDoc("report", r.id) },
       ],
     };
     if (mode === "pay") return {
@@ -181,7 +182,7 @@ function OrdersView({ scope, mode }) {
       rowActions: [
         eye("orders"),
         { label: "Pay", icon: ReceiptText, variant: "primary", show: (r) => r.status !== "CANCELLED" && Number(r.total) > Number(r.paidAmount), onClick: (r) => setPayOrder(r) },
-        { label: "Invoice", icon: Printer, show: (r) => r.status !== "CANCELLED", href: (r) => `/billing/${r.id}` },
+        { label: "Invoice", icon: Printer, show: (r) => r.status !== "CANCELLED", onClick: (r, ctx) => ctx.openDoc("invoice", r.id) },
       ],
     };
     return {

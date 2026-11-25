@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { apiContext, authorityWhere, resolveWriteTarget, scopeWhere } from "@/lib/scope";
 import { fail, handleError, isUuid, json, paging, parseBody, serialize } from "@/lib/http";
+import { memo, memoDelete } from "@/lib/memo";
 
 /**
  * Generic, tenant-safe CRUD for simple modules (patients, doctors, tests,
@@ -27,9 +28,16 @@ export function createCrud(cfg) {
     afterWrite,
     conflictMessage,
     allowDelete = true,
+    dependents = [], // relation names that block a hard delete (see DELETE)
+    cacheTtlMs = 0, // short per-scope cache for rarely changing reference lists (e.g. test catalog)
   } = cfg;
 
   const db = () => prisma[model];
+
+  // Cache keys always include the actor, role and full scope, so one user/branch can never
+  // receive another one's cached list. Any write to this model clears every entry of the model.
+  const cachePrefix = `crud:${model}:`;
+  const invalidateCache = () => { if (cacheTtlMs) memoDelete(cachePrefix); };
 
   async function GET(request) {
     try {
@@ -47,12 +55,18 @@ export function createCrud(cfg) {
       if (filters) and.push(...(await filters(sp, scope)));
       const where = { AND: and };
 
-      const [items, total] = await Promise.all([
-        db().findMany({ where, orderBy, skip, take, include }),
-        db().count({ where }),
-      ]);
-      const more = extra ? await extra(where, scope) : {};
-      return json({ items, total, page, pageSize, ...more });
+      const load = async () => {
+        const [items, total] = await Promise.all([
+          db().findMany({ where, orderBy, skip, take, include }),
+          db().count({ where }),
+        ]);
+        const more = extra ? await extra(where, scope) : {};
+        return { items, total, page, pageSize, ...more };
+      };
+      const result = cacheTtlMs
+        ? await memo(`${cachePrefix}${auth.ctx.actor.role}:${auth.ctx.actor.id}:${scope.organizationId || ""}:${scope.branchId || ""}:${sp.toString()}`, cacheTtlMs, load)
+        : await load();
+      return json(result);
     } catch (error) {
       return handleError(error, `${label} list`);
     }
@@ -80,6 +94,7 @@ export function createCrud(cfg) {
         if (afterWrite) await afterWrite(ctx, created);
         return created;
       });
+      invalidateCache();
       return json(row, 201);
     } catch (error) {
       return handleError(error, `${label} create`, conflictMessage);
@@ -109,11 +124,15 @@ export function createCrud(cfg) {
         if (afterWrite) await afterWrite({ ...auth.ctx, target: { organizationId: existing.organizationId, branchId: existing.branchId }, tx }, updated);
         return updated;
       });
+      invalidateCache();
       return json(row);
     } catch (error) {
       return handleError(error, `${label} update`, conflictMessage);
     }
   }
+
+  // Prisma reports "still referenced" as P2003 (FK) or P2014 (required relation).
+  const isLinkedError = (e) => e?.code === "P2003" || e?.code === "P2014";
 
   async function DELETE(request, { params }) {
     try {
@@ -123,14 +142,36 @@ export function createCrud(cfg) {
       if (auth.error) return auth.error;
       const existing = await findOwned(auth.ctx.actor, id);
       if (!existing) return fail(`${label} not found.`, 404);
+
+      const name = label.toLowerCase();
+      // Records that already have transactions are never hard-deleted: they are deactivated
+      // when the model supports it (keeps history intact), otherwise the delete is refused.
+      async function blockedResponse() {
+        if ("isActive" in existing) {
+          if (existing.isActive) await db().update({ where: { id }, data: { isActive: false } });
+          return json({
+            message: `This ${name} is used by other records, so it was deactivated instead of deleted.`,
+            deactivated: true,
+          });
+        }
+        return fail(`This ${name} has linked records (such as orders) and cannot be deleted.`, 409);
+      }
+
+      if (dependents.length) {
+        const counts = await db().findFirst({
+          where: { id },
+          select: { _count: { select: Object.fromEntries(dependents.map((d) => [d, true])) } },
+        });
+        if (dependents.some((d) => (counts?._count?.[d] || 0) > 0)) return await blockedResponse();
+      }
+
       try {
         await db().delete({ where: { id } });
       } catch (error) {
-        if (error?.code === "P2003") {
-          return fail(`This ${label.toLowerCase()} is used by other records and cannot be deleted. Deactivate it instead.`, 409);
-        }
+        if (isLinkedError(error)) return await blockedResponse();
         throw error;
       }
+      invalidateCache();
       return json({ message: `${label} deleted.` });
     } catch (error) {
       return handleError(error, `${label} delete`);

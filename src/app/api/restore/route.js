@@ -1,3 +1,4 @@
+import { memoDelete } from "@/lib/memo";
 import { apiContext } from "@/lib/scope";
 import { RestoreError, restoreBackups } from "@/lib/backup";
 import { fail, handleError, json, readJson } from "@/lib/http";
@@ -16,6 +17,7 @@ export async function POST(request) {
     const file = await readJson(request);
     if (file === null) return fail("The file is not valid JSON.", 400);
     const summary = await restoreBackups(file, auth.ctx.actor, mode);
+    memoDelete("crud:");
     return json({ message: "Restore completed.", summary });
   } catch (error) {
     if (error instanceof RestoreError) return fail(error.message, error.status);

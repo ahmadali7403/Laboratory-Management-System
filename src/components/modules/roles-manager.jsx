@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Eye, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/client";
+import { RoleViewModal } from "@/components/modules/role-detail";
 import { Badge, Button, EmptyState, ErrorState, Field, FormError, Modal, PageHeader, Spinner, inputClass, useConfirm, useToast } from "@/components/ui";
 
 export default function RolesManager() {
@@ -13,6 +13,7 @@ export default function RolesManager() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -41,7 +42,7 @@ export default function RolesManager() {
               <div className="flex items-start justify-between gap-3">
                 <div><p className="flex items-center gap-2 font-semibold text-slate-900">{r.name.replace(/_/g, " ")} {r.organizationName && <Badge tone="gray">{r.organizationName}</Badge>} <Badge tone={r.branchId ? "violet" : "blue"}>{r.branchId ? (r.branchName || "Branch") : "All branches"}</Badge> {r.isSystem && <Badge tone="gray"><Lock size={10} className="mr-1" /> System</Badge>}</p><p className="mt-0.5 text-xs text-slate-500">{r.description || (r.isSystem ? "Full access within its scope. Cannot be modified." : "No description")}</p></div>
                 <div className="flex gap-1">
-                  <Link href={`/roles/${r.id}`} aria-label="View role" title="View" className="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100"><Eye size={15} /></Link>
+                  <Button variant="ghost" size="icon" aria-label="View role" title="View" onClick={() => setViewing(r.id)}><Eye size={15} /></Button>
                   {r.editable && <><Button variant="ghost" size="icon" aria-label="Edit role" onClick={() => setEditing(r)}><Pencil size={15} /></Button><Button variant="ghost" size="icon" aria-label="Delete role" className="text-rose-500" onClick={() => remove(r)}><Trash2 size={15} /></Button></>}
                 </div>
               </div>
@@ -51,6 +52,7 @@ export default function RolesManager() {
           ))}
         </div>
       )}
+      {viewing && <RoleViewModal id={viewing} onClose={() => setViewing(null)} />}
       {editing && data && <RoleForm role={editing} catalog={data.catalog} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />}
     </div>
   );
@@ -97,7 +99,7 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
   }
   const groups = [...new Set(catalog.map((p) => p.key.split(".")[0]))];
   return (
-    <Modal open size="lg" title={isNew ? "New role" : `Edit ${role.name}`} onClose={saving ? undefined : onClose}
+    <Modal open size="md" title={isNew ? "New role" : `Edit ${role.name}`} onClose={saving ? undefined : onClose}
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="role-form" loading={saving}>Save role</Button></>}>
       <form id="role-form" onSubmit={submit} className="space-y-4">
         <FormError message={error} />

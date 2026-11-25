@@ -31,6 +31,7 @@ async function cnicTaken(organizationId, cnic, exceptId) {
 export const patients = createCrud({
   model: "patient",
   label: "Patient",
+  dependents: ["orders"],
   createSchema: patientSchema,
   searchFields: ["name", "mrn", "phone", "cnic"],
   beforeCreate: async ({ tx, target }, data) => {

@@ -37,6 +37,8 @@ const schema = z
 export const tests = createCrud({
   model: "test",
   label: "Test",
+  dependents: ["orderItems"],
+  cacheTtlMs: 20_000,
   orgWide: true,
   createSchema: schema,
   updateSchema: z.object({

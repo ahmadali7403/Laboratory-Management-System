@@ -32,8 +32,11 @@ async function withRetry(fn, attempts = 3) {
 }
 
 async function verifyToken(token) {
+  // A missing/short AUTH_SECRET is a server configuration problem: it must throw (HTTP 500),
+  // not be mistaken for an invalid token, which would silently sign every user out.
+  const key = getSecretKey();
   try {
-    const { payload } = await jwtVerify(token, getSecretKey());
+    const { payload } = await jwtVerify(token, key);
     return payload;
   } catch {
     return null; // bad signature / expired token = really signed out

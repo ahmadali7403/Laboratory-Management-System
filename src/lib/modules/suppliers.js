@@ -16,6 +16,7 @@ const schema = z.object({
 export const suppliers = createCrud({
   model: "supplier",
   label: "Supplier",
+  dependents: ["purchases"],
   orgWide: true,
   createSchema: schema,
   orderBy: [{ name: "asc" }],

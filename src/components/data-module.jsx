@@ -6,6 +6,7 @@ import { Pencil, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/client";
 import { cleanCnicInput, cleanPersonName, cleanPhoneInput } from "@/lib/validators";
 import DataMenu from "@/components/data-tools";
+import { useRecordView } from "@/components/record-view";
 import ParametersEditor from "@/components/parameters-editor";
 import {
   Button,
@@ -142,9 +143,10 @@ export default function DataModule({ config, scope }) {
     return () => ctrl.abort();
   }, [reqKey, ready]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const { openView, openDoc } = useRecordView();
   const ctx = useMemo(
-    () => ({ refresh, toast, confirm, scope }),
-    [refresh, toast, confirm, scope],
+    () => ({ refresh, toast, confirm, scope, openView, openDoc }),
+    [refresh, toast, confirm, scope, openView, openDoc],
   );
 
   const canEdit = (row) =>
@@ -165,8 +167,8 @@ export default function DataModule({ config, scope }) {
     });
     if (!ok) return;
     try {
-      await api(`${config.endpoint}/${row.id}`, { method: "DELETE" });
-      toast.success(`${config.singular} deleted.`);
+      const res = await api(`${config.endpoint}/${row.id}`, { method: "DELETE" });
+      toast.success(res?.message || `${config.singular} deleted.`);
       refresh();
     } catch (e) {
       toast.error(e.message);
@@ -495,9 +497,12 @@ export default function DataModule({ config, scope }) {
 }
 
 // Field widths on the 4-column desktop grid: f.span = 1..4 (default by type).
-function spanClass(f) {
+// Compact modal grid: 2 columns (md modal) or 3 columns (lg modal, used by long forms such as tests).
+function spanClass(f, cols) {
   const span = f.span || (f.type === "textarea" || f.wide || f.type === "params" ? 4 : f.type === "checkbox" ? 1 : f.mask === "name" || f.type === "email" ? 2 : 1);
-  return { 1: "", 2: "sm:col-span-2", 3: "sm:col-span-2 lg:col-span-3", 4: "sm:col-span-2 lg:col-span-4" }[span];
+  if (span === 1) return "";
+  if (cols === 3) return span === 2 ? "sm:col-span-2" : "sm:col-span-3";
+  return "sm:col-span-2";
 }
 const MASK_INPUT_MODE = { phone: "tel", cnic: "numeric" };
 function applyMask(f, v) {
@@ -577,10 +582,12 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
     }
   }
 
+  const wide = config.form.fields.some((f) => f.type === "params") || config.form.fields.length > 9;
+  const cols = wide ? 3 : 2;
   return (
     <Modal
       open
-      size="xl"
+      size={config.form.size || (wide ? "lg" : "md")}
       title={`${mode === "create" ? "New" : "Edit"} ${config.singular}`}
       onClose={saving ? undefined : onClose}
       footer={
@@ -596,12 +603,12 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
     >
       <form id="record-form" onSubmit={submit}>
         <FormError message={error} />
-        <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className={`grid grid-cols-1 gap-x-3 gap-y-2 ${cols === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
           {showBranch && (
             <Field
               label="Branch"
               required={branchMode === "required"}
-              className="lg:col-span-2"
+              className="sm:col-span-2"
               hint={
                 branchMode === "optional"
                   ? "Choose “All branches” to share it with every branch of the organization."
@@ -637,7 +644,7 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
             )
             .map((f) =>
               f.type === "params" ? (
-                <div key={f.name} className="sm:col-span-2 lg:col-span-4">
+                <div key={f.name} className={cols === 3 ? "sm:col-span-3" : "sm:col-span-2"}>
                   <ParametersEditor
                     label={f.label}
                     value={values[f.name]}
@@ -650,7 +657,7 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
                   label={f.label}
                   required={f.required}
                   hint={f.hint}
-                  className={spanClass(f)}
+                  className={spanClass(f, cols)}
                 >
                   {f.type === "select" ? (
                     <Select

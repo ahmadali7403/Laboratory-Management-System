@@ -93,7 +93,7 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
   }
 
   return (
-    <Modal open size="xl" title="New laboratory order" onClose={saving ? undefined : onClose}
+    <Modal open size="lg" title="New laboratory order" onClose={saving ? undefined : onClose}
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="order-form" loading={saving}>Create order · {formatMoney(total)}</Button></>}>
       <form id="order-form" onSubmit={submit} className="grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
@@ -276,7 +276,7 @@ export function ResultDialog({ item, onClose, onSaved }) {
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
   return (
-    <Modal open size={panel ? "xl" : "md"} title={`Enter result · ${item.testName}`} subtitle={`${item.order.patient.name} · ${item.order.orderNo}`} onClose={saving ? undefined : onClose}
+    <Modal open size={panel ? "lg" : "md"} title={`Enter result · ${item.testName}`} subtitle={`${item.order.patient.name} · ${item.order.orderNo}`} onClose={saving ? undefined : onClose}
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="result-form" loading={saving}>Save result</Button></>}>
       <form id="result-form" onSubmit={submit} className="space-y-4">
         <FormError message={error} />
@@ -284,7 +284,7 @@ export function ResultDialog({ item, onClose, onSaved }) {
           <>
             <p className="text-xs text-slate-500">Enter every value. Numeric values are flagged High/Low automatically from the reference range; use the Flag column only to override.</p>
             <div className="overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full min-w-[640px] text-sm">
+              <table className="w-full min-w-[560px] text-sm">
                 <thead className="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-3 py-2 text-left">Parameter</th><th className="px-3 py-2 text-left">Reference</th><th className="px-3 py-2 text-left">Unit</th><th className="w-40 px-3 py-2 text-left">Result</th><th className="w-32 px-3 py-2 text-left">Flag</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
                   {item.results.map((r, i) => (

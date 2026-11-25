@@ -36,6 +36,7 @@ async function idsByStock(scope, status) {
 export const inventory = createCrud({
   model: "inventoryItem",
   label: "Inventory item",
+  dependents: ["purchaseItems"],
   createSchema: schema,
   orderBy: [{ name: "asc" }],
   searchFields: ["name", "sku"],
