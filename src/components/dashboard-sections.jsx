@@ -104,6 +104,7 @@ export function BranchStats({ s }) {
         label="Total Patients"
         value={s.patients}
         tone="blue"
+        href="/patients"
       />
       <StatCard
         icon={UserPlus}
@@ -122,6 +123,7 @@ export function BranchStats({ s }) {
         label="Pending Samples"
         value={s.pendingSamples}
         tone="amber"
+        href="/samples/collect"
       />
       <StatCard
         icon={Activity}
@@ -129,12 +131,14 @@ export function BranchStats({ s }) {
         value={s.pendingResults}
         tone="rose"
         hint="Awaiting entry or verification"
+        href="/results/enter"
       />
       <StatCard
         icon={FileText}
         label="Completed Reports"
         value={s.reports}
         tone="green"
+        href="/reports"
       />
       <StatCard
         icon={Banknote}
@@ -265,5 +269,34 @@ export function QuickLinks({ links }) {
         </Link>
       ))}
     </div>
+  );
+}
+
+/** Step-by-step lab workflow so new staff always know what to do next. */
+export function WorkflowStrip({ steps }) {
+  return (
+    <ol className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {steps.map((step, i) => (
+        <li key={step.href}>
+          <Link
+            href={step.href}
+            className="flex h-full items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-300 hover:shadow-md"
+          >
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white">
+              {i + 1}
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-slate-900">{step.label}</span>
+              <span className="mt-0.5 block text-xs text-slate-500">{step.hint}</span>
+              {step.count > 0 && (
+                <span className="mt-1.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                  {step.count} waiting
+                </span>
+              )}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ol>
   );
 }

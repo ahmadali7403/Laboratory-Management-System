@@ -10,6 +10,7 @@ import {
   DashboardCharts,
   QuickLinks,
   Section,
+  WorkflowStrip,
 } from "@/components/dashboard-sections";
 
 export const instant = false;
@@ -46,6 +47,19 @@ export default async function BranchDashboardPage() {
           branch?.code || ""
         } · Welcome, ${actor.name}`}
       />
+
+      <Section title="Lab Workflow — what to do next">
+        <WorkflowStrip
+          steps={[
+            { href: "/patients?new=1", label: "Register patient", hint: "Add or find the patient" },
+            { href: "/orders?new=1", label: "Create order", hint: "Select tests, take payment" },
+            { href: "/samples/collect", label: "Collect sample", hint: "Mark samples collected", count: stats.pendingSamples },
+            { href: "/results/enter", label: "Enter results", hint: "Type in test values", count: stats.pendingResults },
+            { href: "/results/verify", label: "Verify results", hint: "Doctor / senior approval" },
+            { href: "/reports", label: "Print report", hint: "Give report to patient" },
+          ]}
+        />
+      </Section>
 
       <Section title="Today's Overview">
         <BranchStats s={stats} />

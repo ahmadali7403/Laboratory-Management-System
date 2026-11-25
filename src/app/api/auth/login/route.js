@@ -8,6 +8,14 @@ import {
   destroyUserSession,
 } from "@/lib/auth";
 
+// lastLoginAt is informational only: do not make the person wait for this write.
+// Failures are logged and never block or fail a login.
+function touchLastLogin(write) {
+  Promise.resolve()
+    .then(write)
+    .catch((error) => console.error("lastLoginAt update failed:", error));
+}
+
 export async function POST(request) {
   try {
     const body = await request.json();
@@ -24,11 +32,25 @@ export async function POST(request) {
     }
 
     // Super Admin: login using username OR email.
-    const admin = await prisma.platformAdmin.findFirst({
-      where: {
-        OR: [{ email: identifier }, { username: identifier }],
-      },
-    });
+    // Both lookups are independent, so run them in parallel (one network round trip
+    // to the database instead of two for organization/branch users).
+    const [admin, user] = await Promise.all([
+      prisma.platformAdmin.findFirst({
+        where: {
+          OR: [{ email: identifier }, { username: identifier }],
+        },
+      }),
+      prisma.user.findUnique({
+        where: { username: identifier },
+        include: {
+          organization: { select: { id: true, status: true } },
+          memberships: {
+            include: { branch: { select: { id: true, status: true } } },
+          },
+          userRoles: { include: { role: true } },
+        },
+      }),
+    ]);
 
     if (
       admin &&
@@ -39,10 +61,12 @@ export async function POST(request) {
       await destroyUserSession();
       await createAdminSession(admin);
 
-      await prisma.platformAdmin.update({
-        where: { id: admin.id },
-        data: { lastLoginAt: new Date() },
-      });
+      touchLastLogin(() =>
+        prisma.platformAdmin.update({
+          where: { id: admin.id },
+          data: { lastLoginAt: new Date() },
+        }),
+      );
 
       return NextResponse.json({
         success: true,
@@ -52,17 +76,6 @@ export async function POST(request) {
     }
 
     // Organization / Branch users: existing login flow preserved.
-    const user = await prisma.user.findUnique({
-      where: { username: identifier },
-      include: {
-        organization: { select: { id: true, status: true } },
-        memberships: {
-          include: { branch: { select: { id: true, status: true } } },
-        },
-        userRoles: { include: { role: true } },
-      },
-    });
-
     if (
       !user ||
       user.status !== "ACTIVE" ||
@@ -81,10 +94,12 @@ export async function POST(request) {
       await destroyAdminSession();
       await createUserSession(user, "ORGANIZATION_ADMIN");
 
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
+      touchLastLogin(() =>
+        prisma.user.update({
+          where: { id: user.id },
+          data: { lastLoginAt: new Date() },
+        }),
+      );
 
       return NextResponse.json({
         success: true,
@@ -108,10 +123,12 @@ export async function POST(request) {
       await destroyAdminSession();
       await createUserSession(user, "BRANCH_ADMIN", membership.branchId);
 
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { lastLoginAt: new Date() },
-      });
+      touchLastLogin(() =>
+        prisma.user.update({
+          where: { id: user.id },
+          data: { lastLoginAt: new Date() },
+        }),
+      );
 
       return NextResponse.json({
         success: true,

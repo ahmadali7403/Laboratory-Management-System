@@ -36,8 +36,9 @@ function LoginForm() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.message || "Login failed.");
       try { sessionStorage.setItem("labos:flash", "Signed in successfully."); } catch { /* ignore */ }
+      // The session cookie is already set, and the destination route is dynamic, so a
+      // single navigation is enough (the former extra router.refresh() re-fetched it twice).
       router.replace(data.redirectTo || "/dashboard");
-      router.refresh();
     } catch (err) {
       setError(err.message || "Login process mein error aa gaya.");
       toast.error(err.message || "Login failed.");

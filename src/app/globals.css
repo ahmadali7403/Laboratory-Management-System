@@ -67,3 +67,13 @@ input[type="number"]::-webkit-inner-spin-button { opacity: 0.4; }
 @keyframes labos-toast-in { from { opacity: 0; transform: translateY(-8px) translateX(8px); } to { opacity: 1; transform: none; } }
 .labos-toast { animation: labos-toast-in .18s ease-out; }
 @media (prefers-reduced-motion: reduce) { .labos-toast { animation: none; } }
+
+/* ---- Loading skeletons (instant feedback while a page streams in) ---- */
+@keyframes labos-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.skeleton {
+  border-radius: 0.75rem;
+  background: linear-gradient(90deg, #e8edf5 25%, #f3f6fb 37%, #e8edf5 63%);
+  background-size: 400% 100%;
+  animation: labos-shimmer 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
