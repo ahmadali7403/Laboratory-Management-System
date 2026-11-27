@@ -65,7 +65,6 @@ model Organization {
   roles    Role[]
 
   patients       Patient[]
-  doctors        Doctor[]
   tests          Test[]
   orders         LabOrder[]
   payments       Payment[]
@@ -77,6 +76,19 @@ model Organization {
   sequences      Sequence[]
   reportConsultants String?
   reportFooterNote  String?
+
+  medicineCategories       MedicineCategory[]
+  medicineCompanies        MedicineCompany[]
+  medicines                Medicine[]
+  medicineBatches          MedicineBatch[]
+  pharmacyPurchases        PharmacyPurchase[]
+  pharmacyPurchaseReturns  PharmacyPurchaseReturn[]
+  pharmacySupplierPayments PharmacySupplierPayment[]
+  pharmacySales            PharmacySale[]
+  pharmacySaleReturns      PharmacySaleReturn[]
+  pharmacyStockMovements   PharmacyStockMovement[]
+  pharmacyStockAdjustments PharmacyStockAdjustment[]
+  pharmacyPriceAudits      PharmacyPriceAudit[]
 }
 
 model Branch {
@@ -97,7 +109,6 @@ model Branch {
   memberships  BranchMembership[]
 
   patients       Patient[]
-  doctors        Doctor[]
   tests          Test[]
   orders         LabOrder[]
   payments       Payment[]
@@ -106,6 +117,19 @@ model Branch {
   inventoryItems InventoryItem[]
   purchases      Purchase[]
   notifications  Notification[]
+
+  medicineCategories       MedicineCategory[]
+  medicineCompanies        MedicineCompany[]
+  medicines                Medicine[]
+  medicineBatches          MedicineBatch[]
+  pharmacyPurchases        PharmacyPurchase[]
+  pharmacyPurchaseReturns  PharmacyPurchaseReturn[]
+  pharmacySupplierPayments PharmacySupplierPayment[]
+  pharmacySales            PharmacySale[]
+  pharmacySaleReturns      PharmacySaleReturn[]
+  pharmacyStockMovements   PharmacyStockMovement[]
+  pharmacyStockAdjustments PharmacyStockAdjustment[]
+  pharmacyPriceAudits      PharmacyPriceAudit[]
 
   @@unique([organizationId, code])
   @@unique([id, organizationId])
@@ -252,6 +276,8 @@ enum PaymentMethod {
   CARD
   BANK_TRANSFER
   ONLINE
+  JAZZCASH
+  EASYPAISA
 }
 
 enum PaymentStatus {
@@ -301,35 +327,16 @@ model Patient {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  branch       Branch       @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
-  orders       LabOrder[]
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch        Branch         @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  orders        LabOrder[]
+  pharmacySales PharmacySale[]
 
   @@unique([organizationId, mrn])
   @@unique([id, organizationId])
   @@index([organizationId, branchId, createdAt])
   @@index([branchId, name])
   @@index([branchId, phone])
-}
-
-model Doctor {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @db.Uuid
-  branchId       String?  @db.Uuid
-  name           String
-  specialization String?
-  phone          String?
-  email          String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  branch       Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
-  orders       LabOrder[]
-
-  @@unique([id, organizationId])
-  @@index([organizationId, branchId, isActive])
 }
 
 model Test {
@@ -367,7 +374,6 @@ model LabOrder {
   branchId       String      @db.Uuid
   orderNo        String
   patientId      String      @db.Uuid
-  doctorId       String?     @db.Uuid
   status         OrderStatus @default(REGISTERED)
   paymentStatus  PaymentStatus @default(UNPAID)
   subtotal       Decimal     @db.Decimal(12, 2)
@@ -385,7 +391,6 @@ model LabOrder {
   organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   branch       Branch         @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
   patient      Patient        @relation(fields: [patientId, organizationId], references: [id, organizationId], onDelete: Restrict)
-  doctor       Doctor?        @relation(fields: [doctorId, organizationId], references: [id, organizationId], onDelete: Restrict)
   items        LabOrderItem[]
   samples      Sample[]
   payments     Payment[]
@@ -452,19 +457,22 @@ model Payment {
   id             String        @id @default(uuid()) @db.Uuid
   organizationId String        @db.Uuid
   branchId       String        @db.Uuid
-  orderId        String        @db.Uuid
+  orderId        String?       @db.Uuid
+  pharmacySaleId String?       @db.Uuid
   amount         Decimal       @db.Decimal(12, 2)
   method         PaymentMethod @default(CASH)
   reference      String?
   receivedByName String
   createdAt      DateTime      @default(now())
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  branch       Branch       @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
-  order        LabOrder     @relation(fields: [orderId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch        @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  order        LabOrder?     @relation(fields: [orderId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  pharmacySale PharmacySale? @relation(fields: [pharmacySaleId, organizationId], references: [id, organizationId], onDelete: Restrict)
 
   @@index([organizationId, branchId, createdAt])
   @@index([orderId])
+  @@index([pharmacySaleId])
 }
 
 model Expense {
@@ -487,21 +495,27 @@ model Expense {
 }
 
 model Supplier {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @db.Uuid
-  branchId       String?  @db.Uuid
-  name           String
-  contactPerson  String?
-  phone          String?
-  email          String?
-  address        String?
-  isActive       Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  branchId        String?  @db.Uuid
+  name            String
+  contactPerson   String?
+  phone           String?
+  email           String?
+  address         String?
+  pharmacyBalance Decimal  @default(0) @db.Decimal(12, 2)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  branch       Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
-  purchases    Purchase[]
+  organization             Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch                   Branch?                   @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  purchases                Purchase[]
+  medicines                Medicine[]
+  medicineBatches          MedicineBatch[]
+  pharmacyPurchases        PharmacyPurchase[]
+  pharmacyPurchaseReturns  PharmacyPurchaseReturn[]
+  pharmacySupplierPayments PharmacySupplierPayment[]
 
   @@unique([id, organizationId])
   @@index([organizationId, branchId, isActive])
@@ -616,4 +630,466 @@ model LabResult {
   orderItem LabOrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
 
   @@index([orderItemId, sortOrder])
+}
+
+// ---------------------------------------------------------------------------
+// PHARMACY DOMAIN
+// Tenant rule: every row carries organizationId; branch-owned rows carry
+// branchId and composite (id, organizationId) foreign keys.
+// ---------------------------------------------------------------------------
+
+enum MedicineStatus {
+  ACTIVE
+  INACTIVE
+  DISCONTINUED
+}
+
+enum PharmacyPurchaseStatus {
+  DRAFT
+  ORDERED
+  FINALIZED
+  CANCELLED
+}
+
+enum PharmacySaleStatus {
+  COMPLETED
+  PARTIAL_RETURN
+  RETURNED
+  CANCELLED
+}
+
+enum PharmacyStockMovementType {
+  INITIAL_STOCK
+  PURCHASE_IN
+  SALE_OUT
+  ADJUSTMENT_ADD
+  ADJUSTMENT_SUB
+  PURCHASE_RETURN_OUT
+  SALE_RETURN_IN
+  SALE_CANCEL_RESTORE
+}
+
+enum PharmacyAdjustmentType {
+  INCREASE
+  DECREASE
+  DAMAGED
+  EXPIRED_WRITE_OFF
+  CORRECTION
+}
+
+model MedicineCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String?  @db.Uuid
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  medicines    Medicine[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, isActive])
+  @@index([organizationId, name])
+}
+
+model MedicineCompany {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String?  @db.Uuid
+  name           String
+  country        String?
+  phone          String?
+  email          String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch?      @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  medicines    Medicine[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, isActive])
+  @@index([organizationId, name])
+}
+
+model Medicine {
+  id                   String         @id @default(uuid()) @db.Uuid
+  organizationId       String         @db.Uuid
+  branchId             String         @db.Uuid
+  name                 String
+  genericName          String?
+  categoryId           String?        @db.Uuid
+  companyId            String?        @db.Uuid
+  defaultSupplierId    String?        @db.Uuid
+  strength             String?
+  dosageForm           String?
+  unit                 String         @default("pcs")
+  packSize             Int            @default(1)
+  barcode              String?
+  sku                  String?
+  lowStockAlert        Decimal        @default(10) @db.Decimal(12, 2)
+  defaultPurchasePrice Decimal        @default(0) @db.Decimal(12, 2)
+  defaultSalePrice     Decimal        @default(0) @db.Decimal(12, 2)
+  rackLocation         String?
+  description          String?
+  status               MedicineStatus @default(ACTIVE)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  organization       Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch             Branch                    @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  category           MedicineCategory?         @relation(fields: [categoryId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  company            MedicineCompany?          @relation(fields: [companyId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  defaultSupplier    Supplier?                 @relation(fields: [defaultSupplierId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  batches            MedicineBatch[]
+  purchaseItems      PharmacyPurchaseItem[]
+  saleItems          PharmacySaleItem[]
+  stockMovements     PharmacyStockMovement[]
+  stockAdjustments   PharmacyStockAdjustment[]
+  priceAudits        PharmacyPriceAudit[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, status])
+  @@index([organizationId, branchId, name])
+  @@index([organizationId, branchId, barcode])
+}
+
+model MedicineBatch {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  branchId        String    @db.Uuid
+  medicineId      String    @db.Uuid
+  batchNumber     String
+  expiryDate      DateTime  @db.Date
+  purchasePrice   Decimal   @db.Decimal(12, 2)
+  salePrice       Decimal   @db.Decimal(12, 2)
+  mrp             Decimal?  @db.Decimal(12, 2)
+  initialQuantity Decimal   @db.Decimal(12, 2)
+  quantity        Decimal   @db.Decimal(12, 2)
+  supplierId      String?   @db.Uuid
+  purchaseId      String?   @db.Uuid
+  isActive        Boolean   @default(true)
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization        Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch              Branch                       @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  medicine            Medicine                     @relation(fields: [medicineId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  supplier            Supplier?                    @relation(fields: [supplierId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  purchase            PharmacyPurchase?            @relation(fields: [purchaseId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  purchaseItems       PharmacyPurchaseItem[]
+  purchaseReturnItems PharmacyPurchaseReturnItem[]
+  saleItems           PharmacySaleItem[]
+  saleReturnItems     PharmacySaleReturnItem[]
+  stockMovements      PharmacyStockMovement[]
+  stockAdjustments    PharmacyStockAdjustment[]
+  priceAudits         PharmacyPriceAudit[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, medicineId, expiryDate])
+  @@index([organizationId, branchId, expiryDate])
+  @@index([organizationId, branchId, quantity])
+}
+
+model PharmacyPurchase {
+  id                String                 @id @default(uuid()) @db.Uuid
+  organizationId    String                 @db.Uuid
+  branchId          String                 @db.Uuid
+  purchaseNo        String
+  supplierId        String                 @db.Uuid
+  invoiceNo         String?
+  status            PharmacyPurchaseStatus @default(ORDERED)
+  paymentStatus     PaymentStatus          @default(UNPAID)
+  subtotal          Decimal                @db.Decimal(12, 2)
+  discount          Decimal                @default(0) @db.Decimal(12, 2)
+  additionalCharges Decimal                @default(0) @db.Decimal(12, 2)
+  total             Decimal                @db.Decimal(12, 2)
+  paidAmount        Decimal                @default(0) @db.Decimal(12, 2)
+  returnedAmount    Decimal                @default(0) @db.Decimal(12, 2)
+  paymentMethod     PaymentMethod          @default(CASH)
+  purchaseDate      DateTime               @db.Date
+  stockApplied      Boolean                @default(false)
+  finalizedAt       DateTime?
+  cancelledAt       DateTime?
+  notes             String?
+  createdByName     String
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch           Branch                    @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  supplier         Supplier                  @relation(fields: [supplierId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  items            PharmacyPurchaseItem[]
+  createdBatches   MedicineBatch[]
+  returns          PharmacyPurchaseReturn[]
+  supplierPayments PharmacySupplierPayment[]
+
+  @@unique([organizationId, purchaseNo])
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, purchaseDate])
+  @@index([organizationId, branchId, status])
+  @@index([supplierId])
+}
+
+model PharmacyPurchaseItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  purchaseId       String   @db.Uuid
+  medicineId       String   @db.Uuid
+  batchId          String?  @db.Uuid
+  batchNumber      String
+  expiryDate       DateTime @db.Date
+  quantity         Decimal  @db.Decimal(12, 2)
+  returnedQuantity Decimal  @default(0) @db.Decimal(12, 2)
+  purchasePrice    Decimal  @db.Decimal(12, 2)
+  salePrice        Decimal  @db.Decimal(12, 2)
+  lineTotal        Decimal  @db.Decimal(12, 2)
+
+  purchase    PharmacyPurchase             @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  medicine    Medicine                     @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  batch       MedicineBatch?               @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  returnItems PharmacyPurchaseReturnItem[]
+
+  @@index([purchaseId])
+  @@index([medicineId])
+}
+
+model PharmacyPurchaseReturn {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String   @db.Uuid
+  returnNo       String
+  purchaseId     String   @db.Uuid
+  supplierId     String   @db.Uuid
+  total          Decimal  @db.Decimal(12, 2)
+  reason         String?
+  createdByName  String
+  createdAt      DateTime @default(now())
+
+  organization Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch                       @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  purchase     PharmacyPurchase             @relation(fields: [purchaseId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  supplier     Supplier                     @relation(fields: [supplierId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  items        PharmacyPurchaseReturnItem[]
+
+  @@unique([organizationId, returnNo])
+  @@index([organizationId, branchId, createdAt])
+}
+
+model PharmacyPurchaseReturnItem {
+  id               String  @id @default(uuid()) @db.Uuid
+  returnId         String  @db.Uuid
+  purchaseItemId   String  @db.Uuid
+  batchId          String  @db.Uuid
+  quantity         Decimal @db.Decimal(12, 2)
+  unitPrice        Decimal @db.Decimal(12, 2)
+  lineTotal        Decimal @db.Decimal(12, 2)
+
+  purchaseReturn PharmacyPurchaseReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  purchaseItem   PharmacyPurchaseItem   @relation(fields: [purchaseItemId], references: [id], onDelete: Restrict)
+  batch          MedicineBatch          @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@index([returnId])
+}
+
+model PharmacySupplierPayment {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  branchId       String        @db.Uuid
+  supplierId     String        @db.Uuid
+  purchaseId     String?       @db.Uuid
+  amount         Decimal       @db.Decimal(12, 2)
+  method         PaymentMethod @default(CASH)
+  reference      String?
+  notes          String?
+  paidByName     String
+  createdAt      DateTime      @default(now())
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch            @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  supplier     Supplier          @relation(fields: [supplierId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  purchase     PharmacyPurchase? @relation(fields: [purchaseId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, branchId, createdAt])
+  @@index([supplierId])
+}
+
+model PharmacySale {
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String             @db.Uuid
+  branchId          String             @db.Uuid
+  saleNo            String
+  patientId         String?            @db.Uuid
+  customerName      String             @default("Walk-in Customer")
+  customerPhone     String?
+  isWalkIn          Boolean            @default(true)
+  status            PharmacySaleStatus @default(COMPLETED)
+  paymentStatus     PaymentStatus      @default(PAID)
+  subtotal          Decimal            @db.Decimal(12, 2)
+  itemDiscountTotal Decimal            @default(0) @db.Decimal(12, 2)
+  discount          Decimal            @default(0) @db.Decimal(12, 2)
+  total             Decimal            @db.Decimal(12, 2)
+  paidAmount        Decimal            @default(0) @db.Decimal(12, 2)
+  refundedAmount    Decimal            @default(0) @db.Decimal(12, 2)
+  notes             String?
+  soldByName        String
+  cancelledAt       DateTime?
+  cancelReason      String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch               @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  patient      Patient?             @relation(fields: [patientId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  items        PharmacySaleItem[]
+  payments     Payment[]
+  returns      PharmacySaleReturn[]
+
+  @@unique([organizationId, saleNo])
+  @@unique([id, organizationId])
+  @@index([organizationId, branchId, createdAt])
+  @@index([organizationId, branchId, status])
+  @@index([organizationId, branchId, paymentStatus])
+}
+
+model PharmacySaleItem {
+  id               String   @id @default(uuid()) @db.Uuid
+  saleId           String   @db.Uuid
+  medicineId       String   @db.Uuid
+  batchId          String   @db.Uuid
+  medicineName     String
+  genericName      String?
+  strength         String?
+  batchNumber      String
+  expiryDate       DateTime @db.Date
+  quantity         Decimal  @db.Decimal(12, 2)
+  returnedQuantity Decimal  @default(0) @db.Decimal(12, 2)
+  unitPrice        Decimal  @db.Decimal(12, 2)
+  costPrice        Decimal  @db.Decimal(12, 2)
+  discount         Decimal  @default(0) @db.Decimal(12, 2)
+  lineTotal        Decimal  @db.Decimal(12, 2)
+
+  sale        PharmacySale             @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  medicine    Medicine                 @relation(fields: [medicineId], references: [id], onDelete: Restrict)
+  batch       MedicineBatch            @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  returnItems PharmacySaleReturnItem[]
+
+  @@index([saleId])
+  @@index([medicineId])
+  @@index([batchId])
+}
+
+model PharmacySaleReturn {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  branchId       String   @db.Uuid
+  returnNo       String
+  saleId         String   @db.Uuid
+  total          Decimal  @db.Decimal(12, 2)
+  refundAmount   Decimal  @default(0) @db.Decimal(12, 2)
+  reason         String?
+  createdByName  String
+  createdAt      DateTime @default(now())
+
+  organization Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch                   @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  sale         PharmacySale             @relation(fields: [saleId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  items        PharmacySaleReturnItem[]
+
+  @@unique([organizationId, returnNo])
+  @@index([organizationId, branchId, createdAt])
+}
+
+model PharmacySaleReturnItem {
+  id         String  @id @default(uuid()) @db.Uuid
+  returnId   String  @db.Uuid
+  saleItemId String  @db.Uuid
+  batchId    String  @db.Uuid
+  quantity   Decimal @db.Decimal(12, 2)
+  unitPrice  Decimal @db.Decimal(12, 2)
+  lineTotal  Decimal @db.Decimal(12, 2)
+
+  saleReturn PharmacySaleReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  saleItem   PharmacySaleItem   @relation(fields: [saleItemId], references: [id], onDelete: Restrict)
+  batch      MedicineBatch      @relation(fields: [batchId], references: [id], onDelete: Restrict)
+
+  @@index([returnId])
+}
+
+model PharmacyStockMovement {
+  id             String                    @id @default(uuid()) @db.Uuid
+  organizationId String                    @db.Uuid
+  branchId       String                    @db.Uuid
+  medicineId     String                    @db.Uuid
+  batchId        String                    @db.Uuid
+  type           PharmacyStockMovementType
+  quantityChange Decimal                   @db.Decimal(12, 2)
+  balanceBefore  Decimal                   @db.Decimal(12, 2)
+  balanceAfter   Decimal                   @db.Decimal(12, 2)
+  referenceType  String?
+  referenceId    String?
+  referenceNo    String?
+  reason         String?
+  createdByName  String
+  createdAt      DateTime                  @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch        @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  medicine     Medicine      @relation(fields: [medicineId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  batch        MedicineBatch @relation(fields: [batchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, branchId, createdAt])
+  @@index([medicineId, createdAt])
+  @@index([batchId, createdAt])
+}
+
+model PharmacyStockAdjustment {
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid
+  branchId       String                 @db.Uuid
+  medicineId     String                 @db.Uuid
+  batchId        String                 @db.Uuid
+  adjustmentType PharmacyAdjustmentType
+  quantity       Decimal                @db.Decimal(12, 2)
+  previousStock  Decimal                @db.Decimal(12, 2)
+  newStock       Decimal                @db.Decimal(12, 2)
+  reason         String
+  adjustedByName String
+  createdAt      DateTime               @default(now())
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch        @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  medicine     Medicine      @relation(fields: [medicineId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  batch        MedicineBatch @relation(fields: [batchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, branchId, createdAt])
+  @@index([medicineId])
+}
+
+model PharmacyPriceAudit {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @db.Uuid
+  branchId         String   @db.Uuid
+  medicineId       String   @db.Uuid
+  batchId          String?  @db.Uuid
+  oldPurchasePrice Decimal? @db.Decimal(12, 2)
+  newPurchasePrice Decimal? @db.Decimal(12, 2)
+  oldSalePrice     Decimal? @db.Decimal(12, 2)
+  newSalePrice     Decimal? @db.Decimal(12, 2)
+  reason           String?
+  changedByName    String
+  createdAt        DateTime @default(now())
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  branch       Branch         @relation(fields: [branchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  medicine     Medicine       @relation(fields: [medicineId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  batch        MedicineBatch? @relation(fields: [batchId, organizationId], references: [id, organizationId], onDelete: Restrict)
+
+  @@index([organizationId, branchId, createdAt])
+  @@index([medicineId])
 }

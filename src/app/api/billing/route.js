@@ -13,12 +13,14 @@ export async function GET(request) {
     const method = sp.get("method");
 
     const and = [scopeWhere(auth.ctx.scope)];
-    if (["CASH", "CARD", "BANK_TRANSFER", "ONLINE"].includes(method)) and.push({ method });
+    if (["CASH", "CARD", "BANK_TRANSFER", "ONLINE", "JAZZCASH", "EASYPAISA"].includes(method)) and.push({ method });
     if (q) {
       and.push({
         OR: [
           { order: { orderNo: { contains: q, mode: "insensitive" } } },
           { order: { patient: { name: { contains: q, mode: "insensitive" } } } },
+          { pharmacySale: { saleNo: { contains: q, mode: "insensitive" } } },
+          { pharmacySale: { customerName: { contains: q, mode: "insensitive" } } },
           { reference: { contains: q, mode: "insensitive" } },
         ],
       });
@@ -32,6 +34,7 @@ export async function GET(request) {
         take,
         include: {
           order: { select: { id: true, orderNo: true, patient: { select: { name: true } } } },
+          pharmacySale: { select: { id: true, saleNo: true, customerName: true, patient: { select: { name: true } } } },
           branch: { select: { id: true, name: true } },
         },
       }),

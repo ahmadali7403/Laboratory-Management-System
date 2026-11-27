@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireContext } from "@/lib/scope";
+import { ORDER_READERS } from "@/lib/permissions";
 import { isUuid } from "@/lib/http";
 import { VIEW_DEFS } from "@/lib/view-defs";
 import PrintBar from "@/components/print-button";
@@ -26,8 +27,8 @@ function show(value, kind) {
 const read = (row, key) => (typeof key === "function" ? key(row) : row[key]);
 
 export default async function ViewPage({ params }) {
-  const { actor } = await requireContext();
   const { module, id } = await params;
+  const { actor } = await requireContext(undefined, { module: module === "orders" ? ORDER_READERS : module });
   const def = VIEW_DEFS[module];
   if (!def || !isUuid(id)) notFound();
   // Access-by-id is filtered by the actor's authority in the same query (no cross-tenant reads).

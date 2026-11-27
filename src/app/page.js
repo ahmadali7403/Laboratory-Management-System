@@ -9,5 +9,6 @@ export default async function Home() {
   const user = await getUserSession();
   if (user?.role === "ORGANIZATION_ADMIN") redirect("/organization/dashboard");
   if (user?.role === "BRANCH_ADMIN") redirect("/branch/dashboard");
+  if (user?.role === "STAFF") redirect("/home");
   redirect("/login");
 }

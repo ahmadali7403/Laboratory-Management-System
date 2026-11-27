@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ClipboardList, Footprints, Plus, Receipt, Stethoscope, TestTube, UserCog, UserPlus, Wallet, Boxes } from "lucide-react";
+import { ClipboardList, Footprints, Pill, Plus, Receipt, ShoppingCart, Stethoscope, TestTube, UserCog, UserPlus, Wallet, Boxes } from "lucide-react";
 
-const ICONS = { UserPlus, Footprints, ClipboardList, Receipt, Wallet, TestTube, Stethoscope, Boxes, UserCog };
+const ICONS = { UserPlus, Footprints, ClipboardList, Pill, Receipt, ShoppingCart, Wallet, TestTube, Stethoscope, Boxes, UserCog };
 
 /** Floating (+) shortcut. `actions` are built on the server from the user's own navigation. */
 export default function QuickAdd({ actions }) {
@@ -22,7 +22,21 @@ export default function QuickAdd({ actions }) {
   return (
     <div ref={ref} className="relative shrink-0 print:hidden">
       {open && (
-        <div role="menu" className="absolute left-0 top-9 z-50 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+        <div
+          role="menu"
+          onKeyDown={(e) => {
+            const items = [...e.currentTarget.querySelectorAll('[role="menuitem"]')];
+            const idx = items.indexOf(document.activeElement);
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              items[(idx + 1) % items.length]?.focus();
+            } else if (e.key === "ArrowUp") {
+              e.preventDefault();
+              items[(idx - 1 + items.length) % items.length]?.focus();
+            }
+          }}
+          className="absolute left-0 top-9 z-50 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-xl"
+        >
           <p className="px-2.5 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">Quick add</p>
           {actions.map((a) => {
             const Icon = ICONS[a.icon] || Plus;

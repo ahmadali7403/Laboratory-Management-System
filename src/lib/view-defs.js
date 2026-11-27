@@ -1,4 +1,4 @@
-import { ADMIN_ROLE_NAMES, authorityWhere } from "@/lib/scope";
+import { ADMIN_ROLE_NAMES, authorityWhere, isBranchBound } from "@/lib/scope";
 
 // Definitions for the generic record detail page (/view/<module>/<id>).
 // Every query is restricted by the actor's authority (organization / branch), independent of the UI selector.
@@ -20,24 +20,16 @@ export const VIEW_DEFS = {
     ],
     fields: [["MRN", "mrn"], ["Name", "name"], ["Father / husband", "fatherName"], ["Gender", "gender"], ["Date of birth", "dateOfBirth", "d"], ["Phone", "phone"], ["CNIC", "cnic"], ["Email", "email"], ["Branch", (r) => r.branch?.name], ["Walk-in", "isWalkIn", "b"], ["Registered", "createdAt", "dt"], ["Address", "address"], ["Notes", "notes"]],
   },
-  doctors: {
-    title: "Doctor", back: "/doctors", model: "doctor",
-    where: (a) => ({ ...authorityWhere(a), ...(a.role === "BRANCH_ADMIN" ? { OR: [{ branchId: null }, { branchId: a.branchId }], branchId: undefined } : {}) }),
-    include: { branch: { select: { name: true } }, orders: { orderBy: { createdAt: "desc" }, take: 100, include: { patient: { select: { name: true, mrn: true } } } } },
-    summary: (r) => { const live = r.orders.filter((o) => o.status !== "CANCELLED"); return [["Referred orders (last 100)", live.length], ["Billed", live.reduce((s, o) => s + Number(o.total), 0), "m"], ["Collected", live.reduce((s, o) => s + Number(o.paidAmount), 0), "m"]]; },
-    tables: [{ title: "Referred orders", rows: (r) => r.orders, cols: [["Date", "createdAt", "dt"], ["Order", "orderNo", "t", (x) => `/view/orders/${x.id}`], ["Patient", (x) => `${x.patient.name} (${x.patient.mrn})`], ["Total", "total", "m"], ["Status", "status", "s"]] }],
-    fields: [["Name", "name"], ["Specialization", "specialization"], ["Phone", "phone"], ["Email", "email"], ["Available to", (r) => r.branch?.name || "All branches"], ["Active", "isActive", "b"], ["Added", "createdAt", "dt"]],
-  },
   tests: {
     title: "Test", back: "/tests", model: "test",
-    where: (a) => ({ ...authorityWhere(a), ...(a.role === "BRANCH_ADMIN" ? { OR: [{ branchId: null }, { branchId: a.branchId }], branchId: undefined } : {}) }),
+    where: (a) => ({ ...authorityWhere(a), ...(isBranchBound(a) ? { OR: [{ branchId: null }, { branchId: a.branchId }], branchId: undefined } : {}) }),
     include: { branch: { select: { name: true } }, parameters: { orderBy: { sortOrder: "asc" } } },
     fields: [["Code", "code"], ["Name", "name"], ["Category", "category"], ["Sample type", "sampleType"], ["Price", "price", "m"], ["Unit", "unit"], ["Reference", (r) => r.refRangeText || (r.refLow != null || r.refHigh != null ? `${r.refLow ?? "…"} - ${r.refHigh ?? "…"}` : null)], ["Turnaround (h)", "turnaroundHours"], ["Available to", (r) => r.branch?.name || "All branches"], ["Active", "isActive", "b"]],
     tables: [{ title: "Parameters", rows: (r) => r.parameters, cols: [["Parameter", "name"], ["Unit", "unit"], ["Low", "refLow"], ["High", "refHigh"], ["Text range", "refRangeText"]] }],
   },
   suppliers: {
     title: "Supplier", back: "/suppliers", model: "supplier",
-    where: (a) => ({ ...authorityWhere(a), ...(a.role === "BRANCH_ADMIN" ? { OR: [{ branchId: null }, { branchId: a.branchId }], branchId: undefined } : {}) }),
+    where: (a) => ({ ...authorityWhere(a), ...(isBranchBound(a) ? { OR: [{ branchId: null }, { branchId: a.branchId }], branchId: undefined } : {}) }),
     include: { branch: { select: { name: true } }, purchases: { orderBy: { purchaseDate: "desc" }, take: 50 } },
     fields: [["Name", "name"], ["Contact person", "contactPerson"], ["Phone", "phone"], ["Email", "email"], ["Address", "address"], ["Available to", (r) => r.branch?.name || "All branches"], ["Active", "isActive", "b"]],
     summary: (r) => [["Purchases (listed)", r.purchases.length], ["Total purchased (not cancelled)", r.purchases.filter((p) => p.status !== "CANCELLED").reduce((s, p) => s + Number(p.total), 0), "m"]],
@@ -46,7 +38,7 @@ export const VIEW_DEFS = {
   inventory: {
     title: "Inventory item", back: "/inventory", model: "inventoryItem",
     where: (a) => authorityWhere(a),
-    include: { branch: { select: { name: true } }, purchaseItems: { orderBy: { createdAt: "desc" }, take: 30, include: { purchase: { select: { purchaseNo: true, purchaseDate: true, status: true, supplier: { select: { name: true } } } } } } },
+    include: { branch: { select: { name: true } }, purchaseItems: { orderBy: { purchase: { purchaseDate: "desc" } }, take: 30, include: { purchase: { select: { purchaseNo: true, purchaseDate: true, status: true, supplier: { select: { name: true } } } } } } },
     fields: [["Name", "name"], ["SKU / code", "sku"], ["In stock", (r) => `${Number(r.quantity)} ${r.unit}`], ["Reorder level", (r) => `${Number(r.reorderLevel)} ${r.unit}`], ["Stock status", (r) => (Number(r.quantity) <= 0 ? "Out of stock" : Number(r.reorderLevel) > 0 && Number(r.quantity) <= Number(r.reorderLevel) ? "Low stock" : "Normal")], ["Unit cost", "unitCost", "m"], ["Stock value", (r) => (r.unitCost == null ? null : `Rs ${(Number(r.quantity) * Number(r.unitCost)).toLocaleString("en-PK")}`)], ["Branch", (r) => r.branch?.name], ["Active", "isActive", "b"]],
     tables: [{ title: "Purchase history", rows: (r) => r.purchaseItems, cols: [["Purchase", (x) => x.purchase.purchaseNo], ["Date", (x) => x.purchase.purchaseDate, "d"], ["Supplier", (x) => x.purchase.supplier.name], ["Qty", (x) => Number(x.quantity)], ["Status", (x) => x.purchase.status]] }],
   },
@@ -67,10 +59,10 @@ export const VIEW_DEFS = {
     title: "Order", back: "/orders", model: "labOrder",
     where: (a) => authorityWhere(a),
     include: {
-      branch: { select: { name: true } }, patient: { select: { id: true, name: true, mrn: true, phone: true } }, doctor: { select: { name: true } },
+      branch: { select: { name: true } }, patient: { select: { id: true, name: true, mrn: true, phone: true } },
       items: { orderBy: { createdAt: "asc" } }, samples: true, payments: { orderBy: { createdAt: "desc" } },
     },
-    fields: [["Order no", "orderNo"], ["Patient", (r) => `${r.patient.name} (${r.patient.mrn})`, "t", (r) => `/view/patients/${r.patient.id}`], ["Phone", (r) => r.patient.phone], ["Doctor", (r) => r.doctor?.name || r.referredBy], ["Status", "status", "s"], ["Payment", "paymentStatus", "s"], ["Subtotal", "subtotal", "m"], ["Discount", "discount", "m"], ["Total", "total", "m"], ["Paid", "paidAmount", "m"], ["Balance", (r) => Number(r.total) - Number(r.paidAmount), "m"], ["Branch", (r) => r.branch?.name], ["Created", "createdAt", "dt"], ["Created by", "createdByName"], ["Notes", "notes"]],
+    fields: [["Order no", "orderNo"], ["Patient", (r) => `${r.patient.name} (${r.patient.mrn})`, "t", (r) => `/view/patients/${r.patient.id}`], ["Phone", (r) => r.patient.phone], ["Status", "status", "s"], ["Payment", "paymentStatus", "s"], ["Subtotal", "subtotal", "m"], ["Discount", "discount", "m"], ["Total", "total", "m"], ["Paid", "paidAmount", "m"], ["Balance", (r) => Number(r.total) - Number(r.paidAmount), "m"], ["Branch", (r) => r.branch?.name], ["Created", "createdAt", "dt"], ["Created by", "createdByName"], ["Notes", "notes"]],
     tables: [
       { title: "Tests & results", rows: (r) => r.items, cols: [["Test", "testName"], ["Price", "price", "m"], ["Result", (x) => (x.resultValue ? `${x.resultValue} ${x.unit || ""}` : null)], ["Flag", "flag"], ["Status", "resultStatus", "s"]] },
       { title: "Samples", rows: (r) => r.samples, cols: [["Sample", "sampleNo"], ["Type", "sampleType"], ["Status", "status", "s"], ["Collected", "collectedAt", "dt"], ["Rejection", "rejectionReason"]] },
@@ -94,7 +86,7 @@ export const VIEW_DEFS = {
   },
   staff: {
     title: "Staff member", back: "/staff", model: "user",
-    where: (a) => ({ ...(authorityWhere(a).organizationId ? { organizationId: authorityWhere(a).organizationId } : {}), ...(a.role === "BRANCH_ADMIN" ? { memberships: { some: { branchId: a.branchId } } } : {}), userRoles: { some: { role: { name: { notIn: ADMIN_ROLE_NAMES } } } } }),
+    where: (a) => ({ ...(authorityWhere(a).organizationId ? { organizationId: authorityWhere(a).organizationId } : {}), ...(isBranchBound(a) ? { memberships: { some: { branchId: a.branchId } } } : {}), userRoles: { some: { role: { name: { notIn: ADMIN_ROLE_NAMES } } } } }),
     include: { userRoles: { select: { role: { select: { name: true } } } }, memberships: { select: { branch: { select: { name: true } } } } },
     fields: [["Name", "name"], ["Email", (r) => (r.email.endsWith("@staff.labos.local") ? null : r.email)], ["Phone", "phone"], ["Role", (r) => r.userRoles.map((x) => x.role.name).join(", ")], ["Branch", (r) => r.memberships.map((m) => m.branch.name).join(", ")], ["Status", "status", "s"], ["Added", "createdAt", "dt"]],
   },

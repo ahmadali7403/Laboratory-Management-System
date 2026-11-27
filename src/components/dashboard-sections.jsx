@@ -286,8 +286,12 @@ export function WorkflowStrip({ steps }) {
               {i + 1}
             </span>
             <span className="min-w-0">
-              <span className="block text-sm font-semibold text-slate-900">{step.label}</span>
-              <span className="mt-0.5 block text-xs text-slate-500">{step.hint}</span>
+              <span className="block text-sm font-semibold text-slate-900">
+                {step.label}
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                {step.hint}
+              </span>
               {step.count > 0 && (
                 <span className="mt-1.5 inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
                   {step.count} waiting

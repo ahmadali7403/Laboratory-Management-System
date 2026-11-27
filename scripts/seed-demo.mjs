@@ -10,7 +10,7 @@ const organizationId = process.env.DEMO_ORGANIZATION_ID;
 const requestedBranchId = process.env.DEMO_BRANCH_ID;
 
 const permissionCatalog = [
-  "patients", "doctors", "tests", "orders", "samples", "results", "verification",
+  "patients", "tests", "orders", "samples", "results", "verification",
   "reports", "billing", "expenses", "inventory", "suppliers", "purchases",
 ].flatMap((key) => [
   { key: `${key}.view`, name: `View ${key}` },
@@ -52,12 +52,6 @@ async function main() {
     tests.push(row);
     mark(`Test: ${data.name}`, row.createdAt.getTime() >= now.getTime() - 3000);
   }
-
-  let doctor = await prisma.doctor.findFirst({ where: { organizationId, name: "Dr. Ayesha Khan", specialization: "Pathology" } });
-  if (!doctor) {
-    doctor = await prisma.doctor.create({ data: { organizationId, branchId: null, name: "Dr. Ayesha Khan", specialization: "Pathology", phone: "+92 300 1234567", email: "demo.pathologist@example.com" } });
-    mark("Doctor: Dr. Ayesha Khan", true);
-  } else mark("Doctor: Dr. Ayesha Khan", false);
 
   let supplier = await prisma.supplier.findFirst({ where: { organizationId, name: "MedLab Scientific Supplies" } });
   if (!supplier) {
@@ -129,7 +123,6 @@ async function main() {
           branchId: branch.id,
           orderNo: spec.orderNo,
           patientId: spec.patient.id,
-          doctorId: doctor.id,
           status: spec.status,
           paymentStatus: spec.paymentStatus,
           subtotal,

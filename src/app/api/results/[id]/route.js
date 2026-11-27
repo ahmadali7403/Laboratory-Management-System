@@ -1,3 +1,4 @@
+import { hasModule } from "@/lib/permissions";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { apiContext, authorityWhere } from "@/lib/scope";
@@ -30,6 +31,9 @@ export async function PATCH(request, { params }) {
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
     const input = parsed.data;
+    const who = auth.ctx.actor;
+    if (who.role === "STAFF" && !hasModule(who.permissions, input.action === "enter" ? "results" : "verification", true))
+      return fail("You do not have permission to do this.", 403);
 
     const result = await prisma.$transaction(async (tx) => {
       const item = await tx.labOrderItem.findFirst({

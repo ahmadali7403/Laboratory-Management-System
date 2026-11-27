@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Eye, FileText, FlaskConical, PackageCheck, Plus, Printer, ReceiptText, RotateCcw, ShieldCheck, TestTube2, X, XCircle, Droplet } from "lucide-react";
 import DataModule from "@/components/data-module";
 import { Badge, Button, Field, Modal, StatusBadge, inputClass, useConfirm, useToast } from "@/components/ui";
 import { api, formatDate, formatDateTime, formatMoney } from "@/lib/client";
-import { NewOrderDialog, NewPurchaseDialog, OrderDetailDialog, PaymentDialog, ResultDialog } from "./lab-dialogs";
+import { NewPurchaseDialog, OrderDetailDialog, PaymentDialog, ResultDialog } from "./lab-dialogs";
 
 const opts = (arr) => arr.map((v) => (Array.isArray(v) ? { value: v[0], label: v[1] } : { value: v, label: v }));
 // View opens a compact modal (no page navigation).
 const eye = (mod) => ({ label: "View", icon: Eye, onClick: (r, ctx) => ctx.openView(mod, r.id) });
 const branchCell = (r) => r.branch?.name || <Badge tone="violet">All branches</Badge>;
-const orgWideEdit = (row, scope) => scope.role !== "BRANCH_ADMIN" || row.branchId !== null;
+const orgWideEdit = (row, scope) => scope.role !== "BRANCH_ADMIN" || row.branchId !== null; // staff arrive as BRANCH_ADMIN here (see publicScope)
 const age = (dob) => (dob ? `${Math.max(0, Math.floor((Date.now() - new Date(dob)) / 3.156e10))}y` : "—");
 
 const CONFIGS = {
@@ -33,19 +33,6 @@ const CONFIGS = {
       { name: "phone", label: "Phone", mask: "phone", maxLength: 16, placeholder: "03XXXXXXXXX" }, { name: "cnic", label: "CNIC", mask: "cnic", maxLength: 15, placeholder: "35202-1234567-1" },
       { name: "email", label: "Email", type: "email", span: 2 },
       { name: "address", label: "Address", span: 4, maxLength: 300 },
-    ] },
-  }),
-  doctors: () => ({
-    title: "Doctors", singular: "Doctor", plural: "doctors", endpoint: "/api/doctors", rowActions: [eye("doctors")], canEditRow: orgWideEdit,
-    columns: [
-      { label: "Name", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> },
-      { label: "Specialization", key: "specialization" }, { label: "Phone", key: "phone" },
-      { label: "Available to", render: branchCell }, { label: "Status", render: (r) => <StatusBadge value={r.isActive ? "ACTIVE" : "INACTIVE"} /> },
-    ],
-    form: { branch: "optional", fields: [
-      { name: "name", label: "Doctor name", required: true, mask: "name", span: 2 }, { name: "specialization", label: "Specialization" },
-      { name: "phone", label: "Phone", mask: "phone", maxLength: 16 }, { name: "email", label: "Email", type: "email", span: 2 },
-      { name: "isActive", label: "Status", type: "checkbox", default: true, checkboxLabel: "Active" },
     ] },
   }),
   tests: () => ({
@@ -127,18 +114,11 @@ const CONFIGS = {
 // ---- Orders / samples / results / reports / billing / purchases -------------
 function OrdersView({ scope, mode }) {
   const [detailId, setDetailId] = useState(null);
-  const [newOpen, setNewOpen] = useState(false);
-  const [walkFirst, setWalkFirst] = useState(false);
   const sp = useSearchParams();
   const router = useRouter();
-  const pathname = usePathname();
   useEffect(() => {
     const n = sp.get("new");
-    if (mode === "orders" && (n === "1" || n === "walkin")) {
-      setWalkFirst(n === "walkin");
-      setNewOpen(true);
-      router.replace(pathname, { scroll: false });
-    }
+    if (mode === "orders" && (n === "1" || n === "walkin")) router.replace(n === "walkin" ? "/orders/new?walkin=1" : "/orders/new");
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
   const [payOrder, setPayOrder] = useState(null);
   const [bump, setBump] = useState(0);
@@ -190,14 +170,13 @@ function OrdersView({ scope, mode }) {
       filters: [{ key: "status", label: "All statuses", options: opts(["REGISTERED", "SAMPLE_COLLECTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"].map((s) => [s, s.replace(/_/g, " ")])) },
         { key: "paymentStatus", label: "All payments", options: opts([["UNPAID", "Unpaid"], ["PARTIAL", "Partial"], ["PAID", "Paid"]]) }],
       rowActions: [eye("orders")],
-      headerActions: () => <Button onClick={() => setNewOpen(true)}><Plus size={16} /> New order</Button>,
+      headerActions: () => (scope.isStaff && !scope.permissions?.includes("orders.manage") ? null : <Button onClick={() => router.push("/orders/new")}><Plus size={16} /> New order</Button>),
     };
   }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
       <DataModule key={`${mode}-${bump}`} config={config} scope={scope} />
-      {newOpen && <NewOrderDialog initialWalk={walkFirst} scope={scope} onClose={() => setNewOpen(false)} onSaved={() => { setNewOpen(false); setBump((b) => b + 1); }} />}
       {detailId && <OrderDetailDialog orderId={detailId} onClose={() => setDetailId(null)} onChanged={() => setBump((b) => b + 1)} />}
       {payOrder && <PaymentDialog order={payOrder} onClose={() => setPayOrder(null)} onSaved={() => { setPayOrder(null); setBump((b) => b + 1); }} />}
     </>
@@ -206,13 +185,16 @@ function OrdersView({ scope, mode }) {
 
 function PaymentsView({ scope }) {
   const config = {
-    title: "Payments", singular: "Payment", plural: "payments", endpoint: "/api/billing", searchPlaceholder: "Search order, patient or reference...",
-    filters: [{ key: "method", label: "All methods", options: opts([["CASH", "Cash"], ["CARD", "Card"], ["BANK_TRANSFER", "Bank transfer"], ["ONLINE", "Online"]]) }],
+    title: "Payments", singular: "Payment", plural: "payments", endpoint: "/api/billing", searchPlaceholder: "Search order, sale, patient or reference...",
+    filters: [{ key: "method", label: "All methods", options: opts([["CASH", "Cash"], ["CARD", "Card"], ["BANK_TRANSFER", "Bank transfer"], ["ONLINE", "Online"], ["JAZZCASH", "JazzCash"], ["EASYPAISA", "EasyPaisa"]]) }],
     columns: [
-      { label: "Date", render: (r) => formatDateTime(r.createdAt) }, { label: "Order", render: (r) => <span className="font-mono text-xs font-semibold">{r.order.orderNo}</span> },
-      { label: "Patient", render: (r) => r.order.patient.name }, { label: "Branch", render: (r) => r.branch.name },
+      { label: "Date", render: (r) => formatDateTime(r.createdAt) },
+      { label: "Order / Sale", render: (r) => r.order ? <span className="font-mono text-xs font-semibold">{r.order.orderNo}</span> : r.pharmacySale ? <span className="inline-flex items-center gap-1 font-mono text-xs font-semibold text-emerald-700">{r.pharmacySale.saleNo} <Badge tone="green">Rx</Badge></span> : "—" },
+      { label: "Customer / Patient", render: (r) => r.order?.patient?.name || r.pharmacySale?.patient?.name || r.pharmacySale?.customerName || "Walk-in Customer" },
+      { label: "Branch", render: (r) => r.branch.name },
       { label: "Method", render: (r) => r.method.replace("_", " ") }, { label: "Reference", key: "reference" },
-      { label: "Received by", key: "receivedByName" }, { label: "Amount", render: (r) => <b>{formatMoney(r.amount)}</b> },
+      { label: "Received by", key: "receivedByName" },
+      { label: "Amount", render: (r) => <b className={Number(r.amount) < 0 ? "text-rose-600" : ""}>{formatMoney(r.amount)}</b> },
     ],
     footer: (d) => d && <p className="mt-3 text-right text-sm font-semibold text-slate-700">Total received (filtered): {formatMoney(d.totalAmount)}</p>,
   };
@@ -384,16 +366,19 @@ function StaffView({ scope }) {
       : roles.length === 0 ? <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">No staff roles exist yet. {scope.role === "BRANCH_ADMIN" ? "Ask your organization admin to create roles." : "Create roles under Roles & Permissions first."}</p> : null,
     canCreate: () => !needsOrg && roles.length > 0,
     columns: [
-      { label: "Name", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> }, { label: "Role", render: (r) => (r.role ? <Badge tone="blue">{r.role.name}</Badge> : "—") },
+      { label: "Name", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> }, { label: "Username", render: (r) => (r.username ? <span className="font-mono text-xs text-slate-600">{r.username}</span> : <span className="text-xs text-amber-600">No login</span>) }, { label: "Role", render: (r) => (r.role ? <Badge tone="blue">{r.role.name}</Badge> : "—") },
       { label: "Branch", render: (r) => r.branch?.name || "—" }, { label: "Email", key: "email" }, { label: "Phone", key: "phone" },
       { label: "Status", render: (r) => <StatusBadge value={r.status} /> },
     ],
     form: {
       branch: "required",
-      toPayload: (v) => { const p = { ...v }; if (!p.email) delete p.email; return p; },
+      toPayload: (v) => { const p = { ...v }; if (!p.email) delete p.email; if (!p.password) delete p.password; if (!p.username) delete p.username; return p; },
       fields: [
         { name: "name", label: "Full name", required: true, mask: "name", span: 2 },
         { name: "roleId", label: "Role", type: "select", required: true, options: roles.map((r) => ({ value: r.id, label: r.branchName ? `${r.name} · ${r.branchName}` : `${r.name} · all branches` })), init: (row) => row.role?.id || "" },
+        { name: "username", label: "Login username", required: true, maxLength: 30, init: (row) => row.username || "" },
+        { name: "password", label: "Password", type: "password", required: true, createOnly: true, maxLength: 100 },
+        { name: "password", label: "New password (blank = keep)", type: "password", editOnly: true, maxLength: 100, init: () => "" },
         { name: "email", label: "Email", type: "email", span: 2 }, { name: "phone", label: "Phone", mask: "phone", maxLength: 16 },
         { name: "status", label: "Status", type: "select", required: true, default: "ACTIVE", options: opts([["ACTIVE", "Active"], ["INACTIVE", "Inactive"]]), editOnly: true },
       ],

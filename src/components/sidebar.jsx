@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   Menu,
   PanelLeftClose,
+  Pill,
   Receipt,
   Search,
   Settings,
@@ -48,6 +49,7 @@ export const ICONS = {
   FlaskConical,
   GitBranch,
   LayoutDashboard,
+  Pill,
   Receipt,
   Search,
   Settings,
@@ -86,6 +88,13 @@ export default function Sidebar({ items = [], unread = 0, roleLabel }) {
       // Storage blocked
     }
   }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") setMobileOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [mobileOpen]);
 
   function update(next) {
     setMode(next);

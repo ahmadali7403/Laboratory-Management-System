@@ -28,7 +28,7 @@ function ResultCell({ value, flag }) {
 }
 
 export default async function ReportPage({ params }) {
-  const { actor } = await requireContext();
+  const { actor } = await requireContext(undefined, { module: "reports" });
   const { id } = await params;
   const order = await loadPrintableOrder(actor, id);
   if (!order || order.status === "CANCELLED") notFound();
@@ -77,7 +77,6 @@ export default async function ReportPage({ params }) {
                 <div className="space-y-0.5 px-2 py-2">
                   <p className="text-center text-[10px] text-slate-500">Lab Number</p>
                   <p className="text-center font-mono text-sm font-bold">{order.orderNo}</p>
-                  <p><b>Consultant:</b> {order.doctor?.name || "SELF"}</p>
                   <p><b>Ref. By:</b> {order.referredBy || ""}</p>
                   <p><b>Registered At:</b> {b.name}</p>
                 </div>

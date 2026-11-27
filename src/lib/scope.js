@@ -5,6 +5,7 @@ import { getAdminSession, getUserSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fail, isUuid } from "@/lib/http";
 import { memo } from "@/lib/memo";
+import { hasModule, staffMayCall } from "@/lib/permissions";
 
 /**
  * TENANT SCOPE ENGINE
@@ -24,11 +25,26 @@ import { memo } from "@/lib/memo";
 export const SCOPE_COOKIE = "labos_scope";
 export const ADMIN_ROLE_NAMES = ["ORGANIZATION_ADMIN", "BRANCH_ADMIN"];
 
+/** Branch admins and staff are both locked to exactly one branch. */
+export const isBranchBound = (actor) => actor.role === "BRANCH_ADMIN" || actor.role === "STAFF";
+
 export function homeFor(role) {
   if (role === "SUPER_ADMIN") return "/dashboard";
   if (role === "ORGANIZATION_ADMIN") return "/organization/dashboard";
   if (role === "BRANCH_ADMIN") return "/branch/dashboard";
+  if (role === "STAFF") return "/home";
   return "/login";
+}
+
+/** Permission keys of every role assigned to the user (read from the database, cached for a few seconds). */
+export async function loadStaffPermissions(userId) {
+  return memo(`perms:${userId}`, 8_000, async () => {
+    const rows = await prisma.rolePermission.findMany({
+      where: { role: { userRoles: { some: { userId } }, name: { notIn: ADMIN_ROLE_NAMES } } },
+      select: { permission: { select: { key: true } } },
+    });
+    return [...new Set(rows.map((r) => r.permission.key))];
+  });
 }
 
 export async function getActor() {
@@ -64,6 +80,17 @@ export async function getActor() {
       branchId: user.branchId,
     };
   }
+  if (user && user.role === "STAFF" && user.branchId) {
+    return {
+      role: "STAFF",
+      id: user.id,
+      name: user.name,
+      username: user.username,
+      organizationId: user.organizationId,
+      branchId: user.branchId,
+      permissions: await loadStaffPermissions(user.id),
+    };
+  }
   return null;
 }
 
@@ -92,7 +119,7 @@ export async function resolveScope(actor, narrowTo = null) {
   let organizationId = null;
   let branchId = null;
 
-  if (actor.role === "BRANCH_ADMIN") {
+  if (isBranchBound(actor)) {
     if (narrowTo && narrowTo !== actor.branchId) return { error: "NOT_FOUND" };
     organizationId = actor.organizationId;
     branchId = actor.branchId;
@@ -150,7 +177,7 @@ export async function resolveScope(actor, narrowTo = null) {
     level: branchId ? "BRANCH" : organizationId ? "ORGANIZATION" : "PLATFORM",
     organizationId,
     branchId,
-    locked: actor.role === "BRANCH_ADMIN",
+    locked: isBranchBound(actor),
   };
 }
 
@@ -160,6 +187,13 @@ export async function apiContext(request, { roles } = {}) {
   if (!actor) return { error: fail("Unauthorized.", 401) };
   if (roles && !roles.includes(actor.role))
     return { error: fail("Forbidden.", 403) };
+  // Staff: the permissions of their role decide which API they may call (default = deny).
+  if (actor.role === "STAFF") {
+    if (!request) return { error: fail("Forbidden.", 403) };
+    const { pathname, search } = new URL(request.url);
+    if (!staffMayCall(actor.permissions, pathname, request.method, search))
+      return { error: fail("You do not have permission to do this.", 403) };
+  }
 
   let narrow = null;
   if (request) {
@@ -181,9 +215,21 @@ export const getPageContext = cache(async () => {
   return { actor, scope };
 });
 
-export async function requireContext(roles) {
+/**
+ * roles   : roles allowed on this page (staff are NOT admitted unless "STAFF" is listed
+ *           or they hold the permission named in `module`).
+ * module  : permission module (or list: any one is enough) a staff member needs; `write` asks for .manage.
+ */
+export async function requireContext(roles, { module, write = false } = {}) {
   const ctx = await getPageContext();
   if (!ctx) redirect("/login");
+  if (ctx.actor.role === "STAFF") {
+    const ok =
+      [].concat(module || []).some((m) => hasModule(ctx.actor.permissions, m, write)) ||
+      (roles && roles.includes("STAFF"));
+    if (!ok) redirect("/home");
+    return ctx;
+  }
   if (roles && !roles.includes(ctx.actor.role))
     redirect(homeFor(ctx.actor.role));
   return ctx;
@@ -193,7 +239,7 @@ export async function requireContext(roles) {
 /**
  * Visibility filter for lists/dashboards (narrowed by the selected scope).
  * `shared: true` also exposes organization-wide rows (branchId = null) such as
- * the test catalog, doctors and suppliers shared by all branches.
+ * the test catalog and suppliers shared by all branches.
  */
 export function scopeWhere(scope, { shared = false } = {}) {
   const where = {};
@@ -211,7 +257,7 @@ export function scopeWhere(scope, { shared = false } = {}) {
  * Branch admin -> own branch only; org admin -> own organization; super -> all.
  */
 export function authorityWhere(actor) {
-  if (actor.role === "BRANCH_ADMIN")
+  if (isBranchBound(actor))
     return { organizationId: actor.organizationId, branchId: actor.branchId };
   if (actor.role === "ORGANIZATION_ADMIN")
     return { organizationId: actor.organizationId };
@@ -221,7 +267,7 @@ export function authorityWhere(actor) {
 /**
  * Decides organizationId/branchId for a NEW row, entirely server-side.
  * `body.branchId` is only a request that is verified against the database.
- * For optional-branch modules (doctors, tests, suppliers) an explicit
+ * For optional-branch modules (tests, suppliers) an explicit
  * `branchId: null` means "all branches of the organization".
  */
 export async function resolveWriteTarget(
@@ -232,7 +278,7 @@ export async function resolveWriteTarget(
   const hasKey = body.branchId !== undefined;
   const requested = hasKey ? body.branchId : undefined;
 
-  if (actor.role === "BRANCH_ADMIN") {
+  if (isBranchBound(actor)) {
     if (requested && requested !== actor.branchId)
       return { error: fail("Branch not found.", 404) };
     return {
@@ -324,7 +370,7 @@ async function loadScopeOptions({ actor, scope }) {
       : [];
 
   let branches = [];
-  if (actor.role === "BRANCH_ADMIN") {
+  if (isBranchBound(actor)) {
     branches = await prisma.branch.findMany({
       where: { id: actor.branchId, organizationId: actor.organizationId },
       select: {
@@ -372,7 +418,11 @@ async function loadScopeOptions({ actor, scope }) {
 /** The only scope information that is ever sent to client components. */
 export function publicScope({ actor, scope }, options) {
   return {
-    role: actor.role,
+    // Staff are branch-locked exactly like a branch admin, so the screens treat them the same way.
+    // Real access is enforced on the server by their role permissions.
+    role: actor.role === "STAFF" ? "BRANCH_ADMIN" : actor.role,
+    isStaff: actor.role === "STAFF",
+    permissions: actor.role === "STAFF" ? actor.permissions : null,
     level: scope.level,
     organizationId: scope.organizationId,
     branchId: scope.branchId,

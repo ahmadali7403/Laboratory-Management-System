@@ -7,7 +7,7 @@ import { BACKUP_MODULE, EXPORT_ROWS } from "@/lib/export-rows";
 import { Button, FormError, Modal, useToast } from "@/components/ui";
 
 const MODULE_LABELS = {
-  tests: "Test catalog", doctors: "Doctors", suppliers: "Suppliers", patients: "Patients", inventory: "Inventory",
+  tests: "Test catalog", suppliers: "Suppliers", patients: "Patients", inventory: "Inventory",
   orders: "Orders, samples, results & payments", expenses: "Expenses", purchases: "Purchases",
 };
 

@@ -164,33 +164,7 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
   ])
     if (!T[need]) throw new Error(`Test ${need} missing.`);
 
-  // ---- doctors / suppliers ----
-  const doctors = [];
-  for (const d of [
-    {
-      name: "Dr. Ayesha Khan",
-      specialization: "Pathologist",
-      phone: "0300-1234567",
-      branchId,
-    },
-    {
-      name: "Dr. Imran Malik",
-      specialization: "Physician",
-      phone: "0321-7654321",
-      branchId,
-    },
-    {
-      name: "Dr. Sana Tariq",
-      specialization: "Gynecologist",
-      phone: "0333-1112223",
-      branchId: null,
-    },
-  ]) {
-    doctors.push(
-      await prisma.doctor.create({ data: { organizationId, ...d } }),
-    );
-    inc("doctors");
-  }
+  // ---- suppliers ----
   const suppliers = [];
   for (const s of [
     {
@@ -322,7 +296,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
     paid = "full",
     method = "CASH",
     discount = 0,
-    doctor = null,
     referredBy = null,
     overrides = {},
     cancelled = false,
@@ -346,7 +319,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
         ...base,
         orderNo,
         patientId: patient.id,
-        doctorId: doctor?.id || null,
         subtotal,
         discount,
         total,
@@ -493,7 +465,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
     patient: shahid,
     tests: ["CBC"],
     day: 62,
-    doctor: doctors[0],
     referredBy: "C.C Siray Mughal",
     overrides: { "WBC COUNT (TLC)": "8.9", MCHC: "32.7" },
   });
@@ -501,7 +472,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
     patient: shahid,
     tests: ["CBC", "LFT"],
     day: 30,
-    doctor: doctors[0],
     referredBy: "C.C Siray Mughal",
     overrides: { "WBC COUNT (TLC)": "9.4", MCHC: "34.0" },
     method: "CARD",
@@ -510,7 +480,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
     patient: shahid,
     tests: ["CBC", "LFT", "RFT", "ELEC", "INFECT"],
     day: 2,
-    doctor: doctors[0],
     referredBy: "C.C Siray Mughal",
     overrides: {
       "WBC COUNT (TLC)": "10.6",
@@ -525,7 +494,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
     patient: fatima,
     tests: ["CBC", "TFT", "LIPID"],
     day: 6,
-    doctor: doctors[2],
     overrides: {
       "HB (HEMOGLOBIN)": "9.8",
       TSH: "6.9",
@@ -538,7 +506,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
     patient: P["Muhammad Usman"],
     tests: ["FBS", "RFT", "LFT"],
     day: 4,
-    doctor: doctors[1],
     paid: "partial",
     overrides: {
       "GLUCOSE FASTING": "168",
@@ -556,7 +523,6 @@ export async function seedBranch(prisma, branchId, { log = console.log } = {}) {
     patient: P["Hamza Ali"],
     tests: ["CBC", "DENGUE"],
     day: 1,
-    doctor: doctors[1],
     result: "ENTERED",
     paid: "partial",
     overrides: { "Platelet Count": "92", "DENGUE NS1 ANTIGEN": "Positive" },

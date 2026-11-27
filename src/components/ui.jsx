@@ -193,7 +193,7 @@ export function Button({
       type="button"
       {...props}
       disabled={props.disabled || loading}
-      className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-lg font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-lg font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 ${variants[variant]} ${sizes[size]} ${className}`}
     >
       {loading && <Loader2 size={15} className="animate-spin" />}
       {children}
@@ -513,6 +513,7 @@ export function Select({
   }
   function onKey(e) {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false); btnRef.current?.focus(); }
+    else if (e.key === "Tab") { setOpen(false); }
     else if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(shown.length - 1, h + 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
     else if (e.key === "Enter") { e.preventDefault(); pick(shown[hi]); }
@@ -530,7 +531,10 @@ export function Select({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={(e) => {
-          if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); openMenu(); }
+          if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ")) {
+            e.preventDefault();
+            openMenu();
+          }
         }}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -603,15 +607,34 @@ export function Modal({
   footer,
   children,
 }) {
+  const dialogRef = useRef(null);
+  const prevFocusRef = useRef(null);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e) => e.key === "Escape" && onClose?.();
+    prevFocusRef.current = document.activeElement;
+    const onKey = (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose?.();
+      }
+    };
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
+    const t = setTimeout(() => {
+      const root = dialogRef.current;
+      if (!root) return;
+      if (!root.contains(document.activeElement)) {
+        const target = root.querySelector("input:not([disabled]):not([type='hidden']), select:not([disabled]), textarea:not([disabled]), button:not([disabled])");
+        target?.focus?.();
+      }
+    }, 10);
     return () => {
+      clearTimeout(t);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
+      try { prevFocusRef.current?.focus?.(); } catch { /* ignore */ }
     };
   }, [open, onClose]);
 
@@ -631,6 +654,7 @@ export function Modal({
       onMouseDown={(e) => e.target === e.currentTarget && onClose?.()}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

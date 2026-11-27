@@ -45,7 +45,6 @@ const resultText = (i) => i.resultValue ?? (i.results?.length ? i.results.map((x
 
 export const REPORT_MODULES = [
   { key: "patients", title: "Patients", description: "Registrations, visits, billing per patient.", entity: "Patient", icon: "Users" },
-  { key: "doctors", title: "Doctors", description: "Referrals and revenue per doctor.", entity: "Doctor", icon: "Stethoscope" },
   { key: "tests", title: "Tests", description: "Most ordered tests and test revenue.", entity: "Test", icon: "TestTube" },
   { key: "orders", title: "Orders", description: "All lab orders, discounts and balances.", entity: "Order", icon: "ClipboardList" },
   { key: "samples", title: "Samples", description: "Collected, received and rejected samples.", entity: "Sample", icon: "Droplets" },
@@ -60,16 +59,16 @@ export const REPORT_MODULES = [
 ];
 
 const orderCols = [
-  col("Date", "createdAt", "dt"), col("Order", "orderNo"), col("Patient", "patient"), col("Doctor", "doctor"),
+  col("Date", "createdAt", "dt"), col("Order", "orderNo"), col("Patient", "patient"),
   col("Total", "total", "m"), col("Discount", "discount", "m"), col("Paid", "paid", "m"), col("Balance", "balance", "m"),
   col("Payment", "paymentStatus", "s"), col("Status", "status", "s"),
 ];
 const orderRow = (o) => ({
-  createdAt: o.createdAt, orderNo: o.orderNo, patient: o.patient ? `${o.patient.name} (${o.patient.mrn})` : null, doctor: o.doctor?.name || o.referredBy || null,
+  createdAt: o.createdAt, orderNo: o.orderNo, patient: o.patient ? `${o.patient.name} (${o.patient.mrn})` : null,
   total: num(o.total), discount: num(o.discount), paid: num(o.paidAmount), balance: num(o.total) - num(o.paidAmount),
   paymentStatus: o.paymentStatus, status: o.status, tests: o.items?.map((i) => i.testName).join(", "),
 });
-const orderInclude = { patient: { select: { name: true, mrn: true } }, doctor: { select: { name: true } }, items: { select: { testName: true } } };
+const orderInclude = { patient: { select: { name: true, mrn: true } }, items: { select: { testName: true } } };
 
 /* ------------------------------------------------------------------ entity pickers */
 export async function listEntities(ctx, module, q = "") {
@@ -83,10 +82,6 @@ export async function listEntities(ctx, module, q = "") {
     case "patients": {
       const rows = await prisma.patient.findMany({ where: { ...base, ...(text ? { OR: [like("name"), like("mrn"), like("phone")] } : {}) }, orderBy: { createdAt: "desc" }, take, select: { id: true, name: true, mrn: true, phone: true } });
       return rows.map((r) => ({ id: r.id, label: `${r.name} · ${r.mrn}`, hint: r.phone }));
-    }
-    case "doctors": {
-      const rows = await prisma.doctor.findMany({ where: { AND: [shared, text ? like("name") : {}] }, orderBy: { name: "asc" }, take, select: { id: true, name: true, specialization: true } });
-      return rows.map((r) => ({ id: r.id, label: r.name, hint: r.specialization }));
     }
     case "tests": {
       const rows = await prisma.test.findMany({ where: { AND: [shared, text ? { OR: [like("name"), like("code")] } : {}] }, orderBy: { name: "asc" }, take, select: { id: true, name: true, code: true } });
@@ -179,23 +174,6 @@ const COMBINED = {
     };
   },
 
-  async doctors({ scope, range, from, to }) {
-    const shared = scopeWhere(scope, { shared: true });
-    const oWhere = { ...scopeWhere(scope), status: live, ...inRange("createdAt", range) };
-    const [doctors, grouped] = await Promise.all([
-      prisma.doctor.findMany({ where: shared, orderBy: { name: "asc" }, take: LIMIT, select: { id: true, name: true, specialization: true, phone: true, isActive: true } }),
-      prisma.labOrder.groupBy({ by: ["doctorId"], where: oWhere, _count: { _all: true }, _sum: { total: true, paidAmount: true } }),
-    ]);
-    const by = Object.fromEntries(grouped.map((x) => [x.doctorId || "none", x]));
-    const rows = doctors.map((d) => ({ name: d.name, specialization: d.specialization, phone: d.phone, active: d.isActive ? "ACTIVE" : "INACTIVE", orders: by[d.id]?._count._all || 0, billed: num(by[d.id]?._sum.total), paid: num(by[d.id]?._sum.paidAmount) })).sort((a, b) => b.billed - a.billed);
-    const none = by.none;
-    return {
-      title: "Doctors report — combined", subtitle: rangeText(from, to),
-      summary: [S("Doctors", doctors.length), S("Active", doctors.filter((d) => d.isActive).length), S("Referred orders", sum(rows, (r) => r.orders)), S("Referral revenue (billed)", sum(rows, (r) => r.billed), "m"), S("Orders without a doctor", none?._count._all || 0)],
-      tables: [T("Referrals per doctor", [col("Doctor", "name"), col("Specialization", "specialization"), col("Phone", "phone"), col("Status", "active", "s"), col("Orders", "orders", "n"), col("Billed", "billed", "m"), col("Collected", "paid", "m")], rows)],
-    };
-  },
-
   async tests({ scope, range, from, to }) {
     const shared = scopeWhere(scope, { shared: true });
     const iWhere = { order: { ...scopeWhere(scope), status: live, ...inRange("createdAt", range) } };
@@ -275,7 +253,7 @@ const COMBINED = {
     const pWhere = { ...base, ...inRange("createdAt", range) };
     const oWhere = { ...base, status: live, ...inRange("createdAt", range) };
     const [payments, total, byMethod, invoiced, unpaid] = await Promise.all([
-      prisma.payment.findMany({ where: pWhere, orderBy: { createdAt: "desc" }, take: LIMIT, include: { order: { select: { orderNo: true, patient: { select: { name: true } } } } } }),
+      prisma.payment.findMany({ where: pWhere, orderBy: { createdAt: "desc" }, take: LIMIT, include: { order: { select: { orderNo: true, patient: { select: { name: true } } } }, pharmacySale: { select: { saleNo: true, customerName: true, patient: { select: { name: true } } } } } }),
       prisma.payment.aggregate({ where: pWhere, _sum: { amount: true }, _count: { _all: true } }),
       prisma.payment.groupBy({ by: ["method"], where: pWhere, _sum: { amount: true }, _count: { _all: true } }),
       prisma.labOrder.aggregate({ where: oWhere, _sum: { total: true, discount: true }, _count: { _all: true } }),
@@ -288,8 +266,8 @@ const COMBINED = {
       tables: [
         T("Collections by method", [col("Method", "method", "s"), col("Payments", "count", "n"), col("Amount", "amount", "m")], byMethod.map((x) => ({ method: x.method, count: x._count._all, amount: num(x._sum.amount) }))),
         T("Outstanding invoices", orderCols, unpaid.map(orderRow)),
-        T(`Payments${total._count._all > LIMIT ? ` (latest ${LIMIT})` : ""}`, [col("Date", "createdAt", "dt"), col("Order", "orderNo"), col("Patient", "patient"), col("Amount", "amount", "m"), col("Method", "method", "s"), col("Reference", "reference"), col("Received by", "receivedByName")],
-          payments.map((p) => ({ ...p, amount: num(p.amount), orderNo: p.order.orderNo, patient: p.order.patient.name }))),
+        T(`Payments${total._count._all > LIMIT ? ` (latest ${LIMIT})` : ""}`, [col("Date", "createdAt", "dt"), col("Order / Sale", "orderNo"), col("Patient / Customer", "patient"), col("Amount", "amount", "m"), col("Method", "method", "s"), col("Reference", "reference"), col("Received by", "receivedByName")],
+          payments.map((p) => ({ ...p, amount: num(p.amount), orderNo: p.order?.orderNo || p.pharmacySale?.saleNo || "—", patient: p.order?.patient?.name || p.pharmacySale?.patient?.name || p.pharmacySale?.customerName || "Walk-in Customer" }))),
       ],
     };
   },
@@ -417,7 +395,7 @@ const orderDetail = (o) => ({
     T("Payments", [col("Date", "createdAt", "dt"), col("Amount", "amount", "m"), col("Method", "method", "s"), col("Reference", "reference"), col("Received by", "receivedByName")], o.payments.map((p) => ({ ...p, amount: num(p.amount) }))),
   ],
 });
-const fullOrder = { patient: { select: { name: true, mrn: true, phone: true } }, doctor: { select: { name: true } }, items: { include: { results: { orderBy: { sortOrder: "asc" }, select: { name: true, value: true } } } }, payments: { orderBy: { createdAt: "desc" } } };
+const fullOrder = { patient: { select: { name: true, mrn: true, phone: true } }, items: { include: { results: { orderBy: { sortOrder: "asc" }, select: { name: true, value: true } } } }, payments: { orderBy: { createdAt: "desc" } } };
 
 const INDIVIDUAL = {
   async patients({ scope, range, id, from, to }) {
@@ -435,18 +413,6 @@ const INDIVIDUAL = {
           orders.flatMap((o) => o.items.map((i) => ({ ...i, date: o.createdAt, orderNo: o.orderNo, result: resultText(i) })))),
         T("Payments", [col("Date", "createdAt", "dt"), col("Order", "orderNo"), col("Amount", "amount", "m"), col("Method", "method", "s"), col("Reference", "reference")], orders.flatMap((o) => o.payments.map((x) => ({ ...x, amount: num(x.amount), orderNo: o.orderNo })))),
       ],
-    };
-  },
-
-  async doctors({ scope, range, id, from, to }) {
-    const d = await prisma.doctor.findFirst({ where: { id, ...scopeWhere(scope, { shared: true }) } });
-    if (!d) return null;
-    const orders = await prisma.labOrder.findMany({ where: { doctorId: id, ...scopeWhere(scope), ...inRange("createdAt", range) }, orderBy: { createdAt: "desc" }, take: LIMIT, include: orderInclude });
-    const liveOrders = orders.filter((o) => o.status !== "CANCELLED");
-    return {
-      title: `Doctor report — ${d.name}`, subtitle: `${d.specialization || "—"}${d.phone ? ` · ${d.phone}` : ""} · ${rangeText(from, to)}`,
-      summary: [S("Referred orders", liveOrders.length), S("Billed", sum(liveOrders, (o) => o.total), "m"), S("Collected", sum(liveOrders, (o) => o.paidAmount), "m"), S("Outstanding", sum(liveOrders, (o) => num(o.total) - num(o.paidAmount)), "m")],
-      tables: [T("Referred orders", [...orderCols, col("Tests", "tests")], orders.map(orderRow))],
     };
   },
 
@@ -468,7 +434,7 @@ const INDIVIDUAL = {
   async orders({ scope, id }) {
     const o = await prisma.labOrder.findFirst({ where: { id, ...scopeWhere(scope) }, include: fullOrder });
     if (!o) return null;
-    return { title: `Order report — ${o.orderNo}`, subtitle: `${o.patient.name} (${o.patient.mrn})${o.doctor ? ` · Dr. ${o.doctor.name}` : ""}`, ...orderDetail(o) };
+    return { title: `Order report — ${o.orderNo}`, subtitle: `${o.patient.name} (${o.patient.mrn})`, ...orderDetail(o) };
   },
   async results({ scope, id }) {
     const o = await prisma.labOrder.findFirst({ where: { id, ...scopeWhere(scope) }, include: fullOrder });

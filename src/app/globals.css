@@ -31,8 +31,8 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 img, svg, video, canvas { max-width: 100%; }
 
 ::selection { background: #dbeafe; color: #1e3a8a; }
-:focus-visible { outline: 2px solid #94a3b8; outline-offset: 2px; }
-input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; }
+:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #3b82f6; outline-offset: 0; }
 input:focus, textarea:focus { background-color: #fff; }
 
 @media (prefers-reduced-motion: reduce) {

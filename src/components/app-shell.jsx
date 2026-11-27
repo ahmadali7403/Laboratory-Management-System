@@ -15,6 +15,7 @@ const ROLE_LABEL = {
   SUPER_ADMIN: "Platform Administration",
   ORGANIZATION_ADMIN: "Organization Workspace",
   BRANCH_ADMIN: "Branch Workspace",
+  STAFF: "Staff Workspace",
 };
 
 export default async function AppShell({ children }) {
@@ -82,7 +83,7 @@ export default async function AppShell({ children }) {
             </div>
 
             <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
-              {actor.role !== "BRANCH_ADMIN" && (
+              {actor.role !== "BRANCH_ADMIN" && actor.role !== "STAFF" && (
                 <ScopeSelector
                   role={actor.role}
                   organizationId={scope.organizationId}
@@ -91,7 +92,7 @@ export default async function AppShell({ children }) {
                 />
               )}
 
-              {actor.role === "BRANCH_ADMIN" && (
+              {(actor.role === "BRANCH_ADMIN" || actor.role === "STAFF") && (
                 <ScopeSelector locked branchName={branch?.name} />
               )}
 
@@ -104,11 +105,13 @@ export default async function AppShell({ children }) {
                     ? "Super Admin"
                     : actor.role === "ORGANIZATION_ADMIN"
                       ? "Organization Admin"
-                      : "Branch Admin"
+                      : actor.role === "STAFF"
+                        ? "Staff"
+                        : "Branch Admin"
                 }
                 organization={org?.name}
                 branch={branch?.name}
-                settingsHref={actor.role === "SUPER_ADMIN" ? null : "/settings"}
+                settingsHref={actor.role === "SUPER_ADMIN" || actor.role === "STAFF" ? null : "/settings"}
                 profileHref={
                   [
                     "SUPER_ADMIN",

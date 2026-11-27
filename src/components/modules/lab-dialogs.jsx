@@ -35,13 +35,10 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
   const dTestQ = useDebounced(testQ);
   const [patients, setPatients] = useState([]);
   const [tests, setTests] = useState([]);
-  const [doctors, setDoctors] = useState([]);
   const [patientId, setPatientId] = useState("");
   const [pickedPatient, setPickedPatient] = useState(null);
   const [walk, setWalk] = useState(Boolean(initialWalk));
-  const [wi, setWi] = useState({ name: "", fatherName: "", gender: "MALE", ageYears: "", phone: "" });
-  const [referredBy, setReferredBy] = useState("");
-  const [doctorId, setDoctorId] = useState("");
+  const [wi, setWi] = useState({ name: "", gender: "MALE", ageYears: "", phone: "" });
   const [selected, setSelected] = useState({});
   const [discount, setDiscount] = useState("");
   const [payAmount, setPayAmount] = useState("");
@@ -53,10 +50,6 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
 
   useEffect(() => {
     if (!b) return;
-    api(`/api/doctors?branchId=${b}&active=1&pageSize=100`).then((d) => setDoctors(d.items)).catch(() => {});
-  }, [b]);
-  useEffect(() => {
-    if (!b) return;
     api(`/api/patients?branchId=${b}&pageSize=30&q=${encodeURIComponent(dPatientQ)}`).then((d) => setPatients(d.items)).catch(() => {});
   }, [b, dPatientQ]);
   useEffect(() => {
@@ -64,7 +57,6 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
     api(`/api/tests?branchId=${b}&active=1&pageSize=40&q=${encodeURIComponent(dTestQ)}`).then((d) => setTests(d.items)).catch(() => {});
   }, [b, dTestQ]);
 
-  const doctorList = b ? doctors : [];
   const patientList = b ? patients : [];
   const testList = b ? tests : [];
   const list = Object.values(selected);
@@ -84,7 +76,7 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
     setSaving(true); setError("");
     try {
       const patientPart = walk ? { walkIn: { ...wi, ageYears: wi.ageYears === "" ? null : Number(wi.ageYears) } } : { patientId };
-      const body = { ...patientPart, referredBy, doctorId: doctorId || null, testIds: list.map((t) => t.id), discount: disc, notes, ...(eb.needsPick ? { branchId: eb.picked } : {}) };
+      const body = { ...patientPart, testIds: list.map((t) => t.id), discount: disc, notes, ...(eb.needsPick ? { branchId: eb.picked } : {}) };
       if (Number(payAmount) > 0) body.payment = { amount: Number(payAmount), method };
       const res = await api("/api/orders", { method: "POST", body });
       toast.success(`Order ${res.orderNo} created.`);
@@ -98,7 +90,7 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
       <form id="order-form" onSubmit={submit} className="grid gap-5 lg:grid-cols-2">
         <div className="space-y-4">
           <FormError message={error} />
-          {eb.needsPick && <BranchPicker scope={scope} picked={eb.picked} onChange={(v) => { eb.setPicked(v); setPatientId(""); setPickedPatient(null); setSelected({}); setDoctorId(""); }} />}
+          {eb.needsPick && <BranchPicker scope={scope} picked={eb.picked} onChange={(v) => { eb.setPicked(v); setPatientId(""); setPickedPatient(null); setSelected({}); }} />}
           <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 text-xs font-semibold">
             <button type="button" onClick={() => setWalk(false)} className={`rounded-md px-3 py-1.5 ${!walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Registered patient</button>
             <button type="button" onClick={() => setWalk(true)} className={`rounded-md px-3 py-1.5 ${walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Walk-in patient</button>
@@ -106,7 +98,6 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
           {walk ? (
             <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 p-3">
               <Field label="Patient name" required className="col-span-2"><input required={walk} value={wi.name} maxLength={120} onChange={(e) => setWi({ ...wi, name: e.target.value })} className={inputClass} disabled={!b} /></Field>
-              <Field label="Father / husband name" className="col-span-2"><input value={wi.fatherName} maxLength={120} onChange={(e) => setWi({ ...wi, fatherName: e.target.value })} className={inputClass} disabled={!b} /></Field>
               <Field label="Age (years)"><input type="number" min="0" max="120" value={wi.ageYears} onChange={(e) => setWi({ ...wi, ageYears: e.target.value })} className={inputClass} disabled={!b} /></Field>
               <Field label="Gender"><Select value={wi.gender} onChange={(e) => setWi({ ...wi, gender: e.target.value })} className={inputClass} disabled={!b}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></Select></Field>
               <Field label="Phone" className="col-span-2"><input value={wi.phone} maxLength={30} onChange={(e) => setWi({ ...wi, phone: e.target.value })} className={inputClass} disabled={!b} /></Field>
@@ -122,13 +113,6 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
               )}
             </Field>
           )}
-          <Field label="Referring doctor">
-            <Select value={doctorId} onChange={(e) => setDoctorId(e.target.value)} className={inputClass} disabled={!b}>
-              <option value="">— Self / none —</option>
-              {doctorList.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialization ? ` (${d.specialization})` : ""}</option>)}
-            </Select>
-          </Field>
-          <Field label="Referred by"><input value={referredBy} maxLength={120} onChange={(e) => setReferredBy(e.target.value)} className={inputClass} placeholder="Clinic / person (optional)" /></Field>
           <Field label="Notes"><textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} rows={2} className={`${inputClass} h-auto py-2`} /></Field>
         </div>
 

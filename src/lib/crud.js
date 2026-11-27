@@ -47,6 +47,7 @@ export function createCrud(cfg) {
       const sp = new URL(request.url).searchParams;
       const q = (sp.get("q") || "").trim().slice(0, 100);
       const { page, pageSize, skip, take } = paging(sp);
+      const inc = sp.get("light") === "1" ? undefined : include; // light = plain columns only (faster lists)
 
       const and = [scopeWhere(scope, { shared: orgWide })];
       if (q && searchFields.length) {
@@ -57,7 +58,7 @@ export function createCrud(cfg) {
 
       const load = async () => {
         const [items, total] = await Promise.all([
-          db().findMany({ where, orderBy, skip, take, include }),
+          db().findMany({ where, orderBy, skip, take, ...(inc ? { include: inc } : {}) }),
           db().count({ where }),
         ]);
         const more = extra ? await extra(where, scope) : {};

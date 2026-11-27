@@ -4,6 +4,7 @@ import { ADMIN_ROLE_NAMES, apiContext, resolveOrganizationTarget } from "@/lib/s
 import { ensurePermissions, grantableKeys, PERMISSION_CATALOG } from "@/lib/permissions";
 import { fail, handleError, json, opt, optUuid, parseBody, req } from "@/lib/http";
 import { assertRoleNameFree } from "@/lib/roles";
+import { ensureBranchDefaults } from "@/lib/default-roles";
 
 export async function GET(request) {
   try {
@@ -18,6 +19,8 @@ export async function GET(request) {
     // Branch admin sees organization-wide roles (read only) plus roles of ITS OWN branch.
     // Org/super admins with a branch selected also see that branch's roles.
     const scopeBranch = isBranch ? actor.branchId : auth.ctx.scope.branchId;
+    // Every branch gets the standard laboratory roles the first time its roles are needed.
+    if (organizationId && scopeBranch) await ensureBranchDefaults(prisma, organizationId, scopeBranch);
     const branchFilter = scopeBranch ? { OR: [{ branchId: null }, { branchId: scopeBranch }] } : {};
     if (optionsOnly) {
       const list = await prisma.role.findMany({

@@ -4,7 +4,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_NAMES, apiContext, resolveWriteTarget } from "@/lib/scope";
 import { fail, handleError, json, opt, optUuid, paging, parseBody, req, uuid } from "@/lib/http";
-import { personName, phoneField } from "@/lib/validators";
+import { usernameTaken } from "@/lib/usernames";
+import { passwordField, personName, phoneField, usernameField } from "@/lib/validators";
 
 const staffInclude = {
   userRoles: { select: { role: { select: { id: true, name: true } } } },
@@ -34,13 +35,14 @@ export async function GET(request) {
         orderBy: { createdAt: "desc" },
         skip,
         take,
-        select: { id: true, name: true, email: true, phone: true, status: true, createdAt: true, organization: { select: { name: true } }, ...staffInclude },
+        select: { id: true, name: true, username: true, email: true, phone: true, status: true, createdAt: true, organization: { select: { name: true } }, ...staffInclude },
       }),
       prisma.user.count({ where }),
     ]);
     const items = rows.map((u) => ({
       id: u.id,
       name: u.name,
+      username: u.username,
       email: u.email.endsWith("@staff.labos.local") ? null : u.email,
       phone: u.phone,
       status: u.status,
@@ -61,11 +63,13 @@ const schema = z.object({
   email: z.string().trim().email("Invalid email address.").max(120).nullish().or(z.literal("")).transform((v) => v || null),
   phone: phoneField,
   roleId: uuid,
+  username: usernameField,
+  password: passwordField,
 });
 
 /**
- * Staff records are directory entries (no login credentials). They receive an
- * unusable random password hash and no username, so they cannot sign in.
+ * A staff member signs in with the username/password set here. After login they only get
+ * the modules that the permissions of their role allow (see lib/permissions.js).
  */
 export async function POST(request) {
   try {
@@ -80,7 +84,8 @@ export async function POST(request) {
     const role = await prisma.role.findFirst({ where: { id: parsed.data.roleId, organizationId, name: { notIn: ADMIN_ROLE_NAMES }, OR: [{ branchId: null }, { branchId }] }, select: { id: true } });
     if (!role) return fail("Role not found.", 404);
 
-    const unusable = await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10);
+    if (await usernameTaken(parsed.data.username)) return fail("This username is already taken. Choose another one.", 409);
+    const passwordHash = await bcrypt.hash(parsed.data.password, 10);
     const email = parsed.data.email?.toLowerCase() || `${crypto.randomUUID()}@staff.labos.local`;
 
     const user = await prisma.$transaction(async (tx) => {
@@ -89,7 +94,8 @@ export async function POST(request) {
           name: parsed.data.name,
           email,
           phone: parsed.data.phone,
-          password: unusable,
+          username: parsed.data.username,
+          password: passwordHash,
           organization: { connect: { id: organizationId } },
         },
         select: { id: true },

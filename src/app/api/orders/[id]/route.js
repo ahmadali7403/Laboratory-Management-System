@@ -5,7 +5,6 @@ import { fail, handleError, isUuid, json, parseBody } from "@/lib/http";
 
 const detailInclude = {
   patient: true,
-  doctor: { select: { id: true, name: true, specialization: true } },
   branch: { select: { id: true, name: true, code: true } },
   items: { orderBy: { createdAt: "asc" }, include: { sample: { select: { id: true, sampleNo: true, status: true } } } },
   samples: { orderBy: { createdAt: "asc" } },

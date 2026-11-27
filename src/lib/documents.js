@@ -9,7 +9,6 @@ export async function loadPrintableOrder(actor, id) {
     where: { id, ...authorityWhere(actor) },
     include: {
       patient: true,
-      doctor: { select: { name: true } },
       branch: { select: { name: true, code: true, address: true, city: true, phone: true, email: true, organization: { select: { name: true, phone: true, reportConsultants: true, reportFooterNote: true } } } },
       items: { orderBy: { createdAt: "asc" }, include: { results: { orderBy: { sortOrder: "asc" } }, test: { select: { category: true, sampleType: true } } } },
       payments: { orderBy: { createdAt: "asc" } },

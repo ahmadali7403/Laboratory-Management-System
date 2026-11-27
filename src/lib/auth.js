@@ -170,9 +170,13 @@ export async function getUserSession() {
       return null;
 
     const roleNames = user.userRoles.map((item) => item.role.name);
-    if (!roleNames.includes(payload.role)) return null;
+    if (payload.role === "STAFF") {
+      // Staff = any login user whose roles are neither of the two admin roles.
+      const isAdmin = roleNames.some((n) => n === "ORGANIZATION_ADMIN" || n === "BRANCH_ADMIN");
+      if (isAdmin || roleNames.length === 0) return null;
+    } else if (!roleNames.includes(payload.role)) return null;
 
-    if (payload.role === "BRANCH_ADMIN") {
+    if (payload.role === "BRANCH_ADMIN" || payload.role === "STAFF") {
       const membership = user.memberships.find(
         (item) =>
           item.branchId === payload.branchId && item.branch.status === "ACTIVE",

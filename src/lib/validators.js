@@ -60,3 +60,10 @@ export const cnicField = z.string().trim().max(20).nullish().transform((v, ctx) 
   if (n === undefined) { ctx.addIssue({ code: "custom", message: CNIC_MESSAGE }); return z.NEVER; }
   return n;
 });
+
+/** Login username: 3-30 chars, lowercase letters, digits, dot, underscore, hyphen. */
+export const usernameField = z.string().trim().toLowerCase()
+  .min(3, "Username must be at least 3 characters.").max(30, "Username must be at most 30 characters.")
+  .regex(/^[a-z0-9._-]+$/, "Username may contain letters, numbers, dot, underscore and hyphen only.");
+
+export const passwordField = z.string().min(6, "Password must be at least 6 characters.").max(100, "Password is too long.");

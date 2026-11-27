@@ -60,7 +60,7 @@ export default function DataModule({ config, scope }) {
   const router = useRouter();
   const pathname = usePathname();
   useEffect(() => {
-    if (searchParams.get("new") === "1" && config.form && (!config.canCreate || config.canCreate(scope))) {
+    if (searchParams.get("new") === "1" && config.form && !writeBlocked(config, scope) && (!config.canCreate || config.canCreate(scope))) {
       setForm({ mode: "create" });
       router.replace(pathname, { scroll: false });
     }
@@ -150,7 +150,7 @@ export default function DataModule({ config, scope }) {
   );
 
   const canEdit = (row) =>
-    config.form
+    config.form && !writeBlocked(config, scope)
       ? config.canEditRow
         ? config.canEditRow(row, scope)
         : true
@@ -193,7 +193,7 @@ export default function DataModule({ config, scope }) {
         }}
         onRestored={refresh}
       />
-      {config.form && (!config.canCreate || config.canCreate(scope)) && (
+      {config.form && !writeBlocked(config, scope) && (!config.canCreate || config.canCreate(scope)) && (
         <Button onClick={() => setForm({ mode: "create" })}>
           <Plus size={16} /> {config.createLabel || `Add ${config.singular}`}
         </Button>
@@ -217,10 +217,18 @@ export default function DataModule({ config, scope }) {
               className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
             />
             <input
+              autoFocus
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
                 setPage(1);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && q) {
+                  e.preventDefault();
+                  setQ("");
+                  setPage(1);
+                }
               }}
               placeholder={config.searchPlaceholder || "Search..."}
               className={`${inputClass} pl-8`}
@@ -505,6 +513,14 @@ function spanClass(f, cols) {
   return "sm:col-span-2";
 }
 const MASK_INPUT_MODE = { phone: "tel", cnic: "numeric" };
+
+// A staff member whose role only has "<module>.view" must not be offered Add / Edit / Delete.
+// (The server enforces the same rule; this only hides the buttons.)
+function writeBlocked(config, scope) {
+  if (!scope.isStaff) return false;
+  const mod = config.permissionModule || String(config.endpoint || "").split("/")[2];
+  return !(scope.permissions || []).includes(`${mod}.manage`);
+}
 function applyMask(f, v) {
   if (f.mask === "phone") return cleanPhoneInput(v);
   if (f.mask === "cnic") return cleanCnicInput(v);
@@ -696,6 +712,7 @@ function RecordForm({ config, scope, mode, row, onClose, onSaved }) {
                   ) : (
                     <input
                       type={f.type || "text"}
+                      autoComplete={f.type === "password" ? "new-password" : undefined}
                       value={values[f.name]}
                       onChange={(e) => set(f.name, applyMask(f, e.target.value))}
                       required={f.required}

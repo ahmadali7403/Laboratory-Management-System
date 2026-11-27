@@ -137,6 +137,36 @@ export async function POST(request) {
       });
     }
 
+    // Staff member: any other role. What they can open is decided by that role's permissions.
+    if (roleNames.length > 0) {
+      const membership = user.memberships.find(
+        (item) => item.branch.status === "ACTIVE",
+      );
+
+      if (!membership) {
+        return NextResponse.json(
+          { message: "Aapki assigned branch active nahi hai." },
+          { status: 403 },
+        );
+      }
+
+      await destroyAdminSession();
+      await createUserSession(user, "STAFF", membership.branchId);
+
+      touchLastLogin(() =>
+        prisma.user.update({
+          where: { id: user.id },
+          data: { lastLoginAt: new Date() },
+        }),
+      );
+
+      return NextResponse.json({
+        success: true,
+        redirectTo: "/home",
+        accountType: "STAFF",
+      });
+    }
+
     return NextResponse.json(
       { message: "Is account ke liye login role configured nahi hai." },
       { status: 403 },

@@ -8,16 +8,15 @@ import { serialize, isUuid } from "@/lib/http";
  *    re-validated against the actor's authority and the database, every row
  *    id must be a UUID and must not collide with another tenant's data.
  */
-export const BACKUP_MODULES = ["tests", "doctors", "suppliers", "patients", "inventory", "orders", "expenses", "purchases"];
+export const BACKUP_MODULES = ["tests", "suppliers", "patients", "inventory", "orders", "expenses", "purchases"];
 export const MODULE_LABELS = {
-  tests: "Test catalog", doctors: "Doctors", suppliers: "Suppliers", patients: "Patients", inventory: "Inventory",
+  tests: "Test catalog", suppliers: "Suppliers", patients: "Patients", inventory: "Inventory",
   orders: "Orders, samples, results & payments", expenses: "Expenses", purchases: "Purchases",
 };
 
 const DATES = new Set(["createdAt", "updatedAt", "dateOfBirth", "expenseDate", "purchaseDate", "receivedAt", "completedAt", "cancelledAt", "collectedAt", "enteredAt", "verifiedAt"]);
 const SIMPLE = {
   tests: { model: "test", fields: ["id", "branchId", "code", "name", "category", "sampleType", "price", "unit", "refLow", "refHigh", "refRangeText", "turnaroundHours", "isActive", "createdAt"] },
-  doctors: { model: "doctor", fields: ["id", "branchId", "name", "specialization", "phone", "email", "isActive", "createdAt"] },
   suppliers: { model: "supplier", fields: ["id", "branchId", "name", "contactPerson", "phone", "email", "address", "isActive", "createdAt"] },
   patients: { model: "patient", fields: ["id", "branchId", "mrn", "name", "fatherName", "isWalkIn", "gender", "dateOfBirth", "phone", "email", "cnic", "address", "notes", "createdAt"] },
   inventory: { model: "inventoryItem", fields: ["id", "branchId", "name", "sku", "unit", "quantity", "reorderLevel", "unitCost", "isActive", "createdAt"] },
@@ -25,7 +24,7 @@ const SIMPLE = {
 };
 const F = {
   parameter: ["id", "name", "unit", "refLow", "refHigh", "refRangeText", "sortOrder"],
-  order: ["id", "branchId", "orderNo", "patientId", "doctorId", "status", "paymentStatus", "subtotal", "discount", "total", "paidAmount", "notes", "referredBy", "createdByName", "completedAt", "cancelledAt", "createdAt"],
+  order: ["id", "branchId", "orderNo", "patientId", "status", "paymentStatus", "subtotal", "discount", "total", "paidAmount", "notes", "referredBy", "createdByName", "completedAt", "cancelledAt", "createdAt"],
   sample: ["id", "sampleNo", "sampleType", "status", "collectedAt", "collectedByName", "rejectionReason"],
   item: ["id", "testId", "sampleId", "testName", "testCode", "price", "resultValue", "unit", "refRange", "flag", "resultStatus", "comments", "enteredByName", "enteredAt", "verifiedByName", "verifiedAt"],
   result: ["id", "name", "unit", "refLow", "refHigh", "refRangeText", "sortOrder", "value", "flag"],
@@ -154,12 +153,13 @@ async function restoreOne(b, actor, mode) {
   if (scopeBranch) need(branchSet.has(scopeBranch), "Branch of this backup does not exist.", 404);
 
   const mods = b.modules;
+  delete mods.doctors; // doctors module was removed; ignore it in old backups
   for (const m of Object.keys(mods)) need(BACKUP_MODULES.includes(m) && Array.isArray(mods[m]), `Unknown section "${m}" in backup.`);
   const total = Object.values(mods).reduce((s, a) => s + a.length, 0);
   need(total <= 200_000, "Backup is too large to restore in one go. Restore module by module.", 413);
 
   // validate branch ownership of every row up-front
-  const orgWideOk = ["tests", "doctors", "suppliers"];
+  const orgWideOk = ["tests", "suppliers"];
   for (const [m, rows] of Object.entries(mods)) {
     checkIds(rows, m);
     for (const r of rows) {
@@ -181,7 +181,7 @@ async function restoreOne(b, actor, mode) {
     const overwrite = mode === "overwrite";
 
     // ---------------- simple modules ----------------
-    for (const m of ["tests", "doctors", "suppliers", "patients", "inventory", "expenses"]) {
+    for (const m of ["tests", "suppliers", "patients", "inventory", "expenses"]) {
       const rows = mods[m] || [];
       if (!rows.length) continue;
       const spec = SIMPLE[m];

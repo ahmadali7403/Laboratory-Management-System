@@ -6,7 +6,6 @@ import { downloadBackup, useRestorePicker } from "@/components/data-tools";
 
 const SECTIONS = [
   ["tests", "Test catalog", "Tests and all their parameters"],
-  ["doctors", "Doctors", "Referring doctors"],
   ["suppliers", "Suppliers", "Supplier directory"],
   ["patients", "Patients", "Registered and walk-in patients"],
   ["inventory", "Inventory", "Stock items and levels"],

@@ -2,7 +2,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_NAMES, apiContext, authorityWhere } from "@/lib/scope";
 import { fail, handleError, isUuid, json, opt, parseBody, req, uuid } from "@/lib/http";
-import { personName, phoneField } from "@/lib/validators";
+import bcrypt from "bcryptjs";
+import { passwordField, personName, phoneField, usernameField } from "@/lib/validators";
+import { usernameTaken } from "@/lib/usernames";
 
 const schema = z.object({
   name: personName("Name").optional(),
@@ -10,6 +12,8 @@ const schema = z.object({
   phone: phoneField,
   roleId: uuid.optional(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  username: usernameField.optional(),
+  password: passwordField.optional().or(z.literal("").transform(() => undefined)),
 });
 
 async function findStaff(actor, id) {
@@ -34,7 +38,9 @@ export async function PATCH(request, { params }) {
     if (!staff) return fail("Staff member not found.", 404);
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
-    const { roleId, ...rest } = parsed.data;
+    const { roleId, password, ...rest } = parsed.data;
+    if (rest.username && (await usernameTaken(rest.username, staff.id))) return fail("This username is already taken. Choose another one.", 409);
+    if (password) rest.password = await bcrypt.hash(password, 10);
 
     await prisma.$transaction(async (tx) => {
       if (roleId) {

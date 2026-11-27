@@ -5,7 +5,7 @@ import { fail, handleError, json, money, opt, optUuid, paging, parseBody, req, r
 import { nextNumber } from "@/lib/sequence";
 import { notify } from "@/lib/notify";
 import { paymentStatusFor } from "@/lib/lab";
-import { optPersonName, personName, phoneField } from "@/lib/validators";
+import { NAME_MESSAGE, NAME_RE, phoneField } from "@/lib/validators";
 
 const STATUSES = ["REGISTERED", "SAMPLE_COLLECTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
 const PAY = ["UNPAID", "PARTIAL", "PAID"];
@@ -44,7 +44,6 @@ export async function GET(request) {
         take,
         include: {
           patient: { select: { id: true, name: true, mrn: true, phone: true } },
-          doctor: { select: { id: true, name: true } },
           branch: { select: { id: true, name: true } },
           _count: { select: { items: true } },
         },
@@ -62,15 +61,12 @@ const createSchema = z.object({
   patientId: uuid.optional(),
   walkIn: z
     .object({
-      name: personName("Patient name"),
-      fatherName: optPersonName(120),
-      gender: z.enum(["MALE", "FEMALE", "OTHER"]).default("MALE"),
+      name: z.string().trim().max(120).optional().default(""),
+      gender: z.enum(["MALE", "FEMALE", "OTHER"]).default("OTHER"),
       ageYears: z.coerce.number().int().min(0).max(120).nullish(),
       phone: phoneField,
     })
     .optional(),
-  referredBy: opt(120),
-  doctorId: optUuid,
   testIds: z.array(uuid).min(1, "Select at least one test.").max(100),
   discount: money.default(0),
   notes: opt(500),
@@ -91,6 +87,12 @@ export async function POST(request) {
     if (parsed.error) return parsed.error;
     const data = parsed.data;
     if (!data.patientId && !data.walkIn) return fail("Select a patient or enter walk-in patient details.", 400);
+    if (data.walkIn) {
+      const wName = data.walkIn.name.trim();
+      if (wName && wName !== "Walk-in Customer" && (wName.length < 2 || !NAME_RE.test(wName))) {
+        return fail(NAME_MESSAGE, 400);
+      }
+    }
 
     const resolved = await resolveWriteTarget(auth.ctx, data, { branchRequired: true });
     if (resolved.error) return resolved.error;
@@ -101,14 +103,6 @@ export async function POST(request) {
     if (data.patientId) {
       patient = await prisma.patient.findFirst({ where: { id: data.patientId, organizationId, branchId }, select: { id: true, name: true } });
       if (!patient) return fail("Patient not found in this branch.", 404);
-    }
-
-    if (data.doctorId) {
-      const doctor = await prisma.doctor.findFirst({
-        where: { id: data.doctorId, organizationId, isActive: true, OR: [{ branchId: null }, { branchId }] },
-        select: { id: true },
-      });
-      if (!doctor) return fail("Doctor not found.", 404);
     }
 
     const testIds = [...new Set(data.testIds)];
@@ -129,24 +123,29 @@ export async function POST(request) {
       async (tx) => {
         if (!patient) {
           const w = data.walkIn;
-          // Reuse an existing record (same branch, same phone and name) so walk-ins never create duplicates.
-          if (w.phone) {
+          const wName = w.name.trim() || "Walk-in Customer";
+          if (wName === "Walk-in Customer" && !w.phone && w.ageYears == null) {
             patient = await tx.patient.findFirst({
-              where: { organizationId, branchId, phone: w.phone, name: { equals: w.name, mode: "insensitive" } },
+              where: { organizationId, branchId, isWalkIn: true, name: "Walk-in Customer", phone: null },
+              select: { id: true, name: true },
+            });
+          } else if (w.phone) {
+            // Reuse an existing record (same branch, same phone and name) so walk-ins never create duplicates.
+            patient = await tx.patient.findFirst({
+              where: { organizationId, branchId, phone: w.phone, name: { equals: wName, mode: "insensitive" } },
               select: { id: true, name: true },
             });
           }
-        }
-        if (!patient) {
-          const w = data.walkIn;
-          const dob = w.ageYears != null ? new Date(Date.now() - w.ageYears * 365.25 * 86_400_000) : null;
-          patient = await tx.patient.create({
-            data: {
-              organizationId, branchId, mrn: await nextNumber(tx, organizationId, "patient", "MRN"),
-              name: w.name, fatherName: w.fatherName, gender: w.gender, dateOfBirth: dob, phone: w.phone, isWalkIn: true,
-            },
-            select: { id: true, name: true },
-          });
+          if (!patient) {
+            const dob = w.ageYears != null ? new Date(Date.now() - w.ageYears * 365.25 * 86_400_000) : null;
+            patient = await tx.patient.create({
+              data: {
+                organizationId, branchId, mrn: await nextNumber(tx, organizationId, "patient", "MRN"),
+                name: wName, gender: w.gender, dateOfBirth: dob, phone: w.phone, isWalkIn: true,
+              },
+              select: { id: true, name: true },
+            });
+          }
         }
         const orderNo = await nextNumber(tx, organizationId, "order", "ORD");
         const types = [...new Set(tests.map((t) => t.sampleType))];
@@ -157,14 +156,12 @@ export async function POST(request) {
             branchId,
             orderNo,
             patientId: patient.id,
-            doctorId: data.doctorId || null,
             subtotal,
             discount,
             total,
             paidAmount: initialPayment,
             paymentStatus: paymentStatusFor(total, initialPayment),
             notes: data.notes,
-            referredBy: data.referredBy,
             createdByName: auth.ctx.actor.name,
             samples: { create: types.map((sampleType, i) => ({ sampleType, sampleNo: `${orderNo}-S${i + 1}` })) },
           },
