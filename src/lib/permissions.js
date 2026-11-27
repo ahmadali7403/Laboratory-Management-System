@@ -21,10 +21,22 @@ export const MODULES = [
   ["pharmacy_reports", "Pharmacy Reports"],
 ];
 
-export const PERMISSION_CATALOG = MODULES.flatMap(([key, label]) => [
-  { key: `${key}.view`, name: `View ${label}`, description: `View ${label.toLowerCase()} records.` },
-  { key: `${key}.manage`, name: `Manage ${label}`, description: `Create, edit and delete ${label.toLowerCase()} records.` },
-]);
+export const EXTRA_PERMISSIONS = [
+  { key: "pos.discount", name: "POS Apply Discount", description: "Apply discounts on POS bills up to the role's maximum discount %." },
+  { key: "pos.discount_override", name: "POS Discount Override", description: "Approve discounts above cashier limit via manager PIN." },
+  { key: "pos.void", name: "POS Void / Cancel", description: "Void or cancel completed POS bills." },
+  { key: "pos.refund", name: "POS Returns & Refunds", description: "Process medicine returns and customer refunds." },
+  { key: "pos.shift_own", name: "POS Own Shift", description: "Open/close own POS shift and print own shift report." },
+  { key: "inventory.cost_view", name: "View Cost & Profit", description: "View purchase prices, stock valuation, and profit margins." },
+];
+
+export const PERMISSION_CATALOG = [
+  ...MODULES.flatMap(([key, label]) => [
+    { key: `${key}.view`, name: `View ${label}`, description: `View ${label.toLowerCase()} records.` },
+    { key: `${key}.manage`, name: `Manage ${label}`, description: `Create, edit and delete ${label.toLowerCase()} records.` },
+  ]),
+  ...EXTRA_PERMISSIONS,
+];
 
 export async function ensurePermissions(prisma) {
   await prisma.permission.createMany({
@@ -33,9 +45,6 @@ export async function ensurePermissions(prisma) {
   });
 }
 
-// Keys the actor may hand out. A branch admin can never grant more than the catalogue
-// entries available to branch level (no module is organization-only today, so this is the
-// whole catalogue; keep the intersection so any future org-only key is rejected server-side).
 const ORG_ONLY_KEYS = new Set([]);
 export function grantableKeys(actor, requested) {
   const valid = new Set(PERMISSION_CATALOG.map((p) => p.key));
@@ -47,23 +56,55 @@ export function grantableKeys(actor, requested) {
 // Everything a staff member may do is decided by the permission keys of their role(s).
 // `manage` implies `view`.
 // ---------------------------------------------------------------------------
-export const hasModule = (perms, module, write = false) =>
+export const hasModule = (perms = [], module, write = false) =>
   write ? perms.includes(`${module}.manage`) : perms.includes(`${module}.view`) || perms.includes(`${module}.manage`);
 
+export const hasPermission = (perms = [], key) => perms.includes(key);
+
+export function canViewCosts(actor) {
+  if (!actor) return false;
+  if (actor.role !== "STAFF") return true;
+  return (
+    hasPermission(actor.permissions, "inventory.cost_view") ||
+    hasModule(actor.permissions, "pharmacy_purchases", true)
+  );
+}
+
+/** Strips cost / profit / margin keys from objects when the caller may not view costs. */
+export function stripCostFields(item) {
+  if (!item || typeof item !== "object") return item;
+  const copy = { ...item };
+  delete copy.purchasePrice;
+  delete copy.defaultPurchasePrice;
+  delete copy.costPrice;
+  delete copy.stockValue;
+  delete copy.totalCost;
+  delete copy.grossProfit;
+  delete copy.profit;
+  delete copy.margin;
+  delete copy.profitMarginPct;
+  if (Array.isArray(copy.batches)) copy.batches = copy.batches.map(stripCostFields);
+  if (Array.isArray(copy.validBatches)) copy.validBatches = copy.validBatches.map(stripCostFields);
+  if (Array.isArray(copy.expiredBatches)) copy.expiredBatches = copy.expiredBatches.map(stripCostFields);
+  if (Array.isArray(copy.items)) copy.items = copy.items.map(stripCostFields);
+  return copy;
+}
+
 const API_MODULES = new Set(["patients", "tests", "orders", "samples", "results", "reports", "billing", "expenses", "inventory", "suppliers", "purchases"]);
-const LOOKUPS = new Set(["patients", "tests"]); // read-only lists the order screen needs
-// Modules whose screens are built on the order list (billing, reports, samples, results ...).
+const LOOKUPS = new Set(["patients", "tests"]);
+
 export const ORDER_READERS = ["orders", "billing", "reports", "samples", "results", "verification"];
 
 /** Decides whether a staff member may call an API path with this HTTP method. Default = deny. */
-export function staffMayCall(perms, pathname, method, search = "") {
-  const parts = pathname.split("/").filter(Boolean); // ["api", "orders", "<id>", "payments"]
+export function staffMayCall(perms = [], pathname, method, search = "") {
+  const parts = pathname.split("/").filter(Boolean);
   const seg = parts[1];
   const write = method !== "GET" && method !== "HEAD";
   if (seg === "notifications") return true;
   if (seg === "pharmacy") {
     const sub = parts[2];
-    if (sub === "dashboard") return !write && (hasModule(perms, "pharmacy") || hasModule(perms, "pharmacy_pos") || hasModule(perms, "pharmacy_inventory"));
+    if (sub === "shifts") return hasModule(perms, "pharmacy_pos") || hasPermission(perms, "pos.shift_own") || hasModule(perms, "pharmacy");
+    if (sub === "dashboard") return !write && (hasModule(perms, "pharmacy") || hasModule(perms, "pharmacy_inventory"));
     if (sub === "alerts") return !write && (hasModule(perms, "pharmacy") || hasModule(perms, "pharmacy_inventory"));
     if (sub === "reports") return !write && (hasModule(perms, "pharmacy_reports") || hasModule(perms, "pharmacy"));
     if (sub === "customers") return !write && hasModule(perms, "pharmacy_pos");
@@ -82,7 +123,7 @@ export function staffMayCall(perms, pathname, method, search = "") {
       return hasModule(perms, "pharmacy_suppliers");
     }
     if (sub === "purchases") return hasModule(perms, "pharmacy_purchases", write);
-    if (sub === "sales") return hasModule(perms, "pharmacy_pos", write);
+    if (sub === "sales") return hasModule(perms, "pharmacy_pos", write) || (!write && (hasModule(perms, "pharmacy") || hasModule(perms, "pharmacy_reports")));
     return false;
   }
   if (seg === "view") {
@@ -98,5 +139,7 @@ export function staffMayCall(perms, pathname, method, search = "") {
   return false;
 }
 
-/** Page access: module key of a ModulePage name + variant (results verify/reopen use "verification"). */
-export const pageModule = (name, variant) => (name === "results" && (variant === "verify" || variant === "reopen") ? "verification" : name);
+export function pageModule(name, variant) {
+  if (name === "results" && ["verify", "reopen"].includes(variant)) return "verification";
+  return name;
+}

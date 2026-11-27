@@ -67,3 +67,10 @@ export const usernameField = z.string().trim().toLowerCase()
   .regex(/^[a-z0-9._-]+$/, "Username may contain letters, numbers, dot, underscore and hyphen only.");
 
 export const passwordField = z.string().min(6, "Password must be at least 6 characters.").max(100, "Password is too long.");
+
+export const pinField = z
+  .string()
+  .trim()
+  .nullish()
+  .transform((v) => (v == null || v === "" ? null : v))
+  .refine((v) => v === null || /^\d{4,6}$/.test(v), "PIN must be 4 to 6 digits.");

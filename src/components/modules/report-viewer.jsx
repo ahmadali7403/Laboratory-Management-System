@@ -80,6 +80,16 @@ export default function ReportViewer({ module, title, entity, modules }) {
       .finally(() => { if (my === reqId.current) setLoading(false); });
   }, [module, mode, from, to, picked]);
   useEffect(run, [run]);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.key === "F9" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p")) && report) {
+        e.preventDefault();
+        window.print();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [report]);
 
   function choosePreset(p) {
     setPreset(p);

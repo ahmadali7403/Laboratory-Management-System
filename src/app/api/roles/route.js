@@ -53,6 +53,10 @@ export async function GET(request) {
         organizationName: r.organization?.name || null,
         // branch admins can only change roles that belong to their own branch
         editable: !(r.isSystem || ADMIN_ROLE_NAMES.includes(r.name)) && (!isBranch || r.branchId === actor.branchId),
+        maxDiscountPct: Number(r.maxDiscountPct ?? 100),
+        canEditPrice: r.canEditPrice !== false,
+        allowedMethods: r.allowedMethods || [],
+        requireShift: Boolean(r.requireShift),
         permissions: r.permissions.map((p) => p.permission.key),
       })),
       catalog: PERMISSION_CATALOG,
@@ -65,11 +69,11 @@ export async function GET(request) {
 const schema = z.object({
   name: req(2, 60, "Role name").regex(/^[A-Za-z0-9 _-]+$/, "Role name may contain letters, numbers, spaces, hyphen and underscore only."),
   description: opt(200),
-  permissions: z.array(z.string().max(60)).max(100).default([]),
-  // Who the role is for. Ignored/verified server-side according to the signed-in level:
-  //   BRANCH_ADMIN        -> always its own branch
-  //   ORGANIZATION_ADMIN  -> branchId = null (all branches) or one of its branches
-  //   SUPER_ADMIN         -> organizationId (or applyToAll) + optional branchId
+  permissions: z.array(z.string().max(60)).max(120).default([]),
+  maxDiscountPct: z.coerce.number().min(0).max(100).default(100),
+  canEditPrice: z.boolean().default(true),
+  allowedMethods: z.array(z.string().max(30)).max(10).default([]),
+  requireShift: z.boolean().default(false),
   organizationId: optUuid,
   branchId: optUuid,
   applyToAll: z.boolean().optional(),
@@ -138,6 +142,10 @@ export async function POST(request) {
           branchId: t.branchId,
           name,
           description,
+          maxDiscountPct: parsed.data.maxDiscountPct ?? 100,
+          canEditPrice: parsed.data.canEditPrice ?? true,
+          allowedMethods: parsed.data.allowedMethods || [],
+          requireShift: Boolean(parsed.data.requireShift),
           permissions: { create: perms.map((p) => ({ permissionId: p.id })) },
         },
         select: { id: true },

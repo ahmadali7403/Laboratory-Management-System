@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { apiContext, authorityWhere } from "@/lib/scope";
+import { apiContext, authorityWhere, canViewCosts, hasPermission, verifyManagerOverride } from "@/lib/scope";
 import { fail, handleError, isUuid, json, opt, parseBody, round2 } from "@/lib/http";
+import { hasModule, stripCostFields } from "@/lib/permissions";
 import { recordStockMovement } from "@/lib/pharmacy";
+import { clientIp, logAudit } from "@/lib/audit";
 
 export async function GET(request, { params }) {
   try {
@@ -11,8 +13,14 @@ export async function GET(request, { params }) {
     if (auth.error) return auth.error;
     if (!isUuid(id)) return fail("Sale not found.", 404);
 
+    const actor = auth.ctx.actor;
+    const isCashierOnly = actor.role === "STAFF" && !hasModule(actor.permissions, "pharmacy") && !hasModule(actor.permissions, "pharmacy_reports");
     const sale = await prisma.pharmacySale.findFirst({
-      where: { id, ...authorityWhere(auth.ctx.actor) },
+      where: {
+        id,
+        ...authorityWhere(actor),
+        ...(isCashierOnly ? { soldByName: actor.name } : {}),
+      },
       include: {
         patient: { select: { id: true, name: true, mrn: true, phone: true } },
         branch: { select: { id: true, name: true, code: true, address: true, city: true, phone: true, organization: { select: { name: true, phone: true } } } },
@@ -25,7 +33,7 @@ export async function GET(request, { params }) {
       },
     });
     if (!sale) return fail("Sale not found.", 404);
-    return json(sale);
+    return json(canViewCosts(actor) ? sale : stripCostFields(sale));
   } catch (error) {
     return handleError(error, "Pharmacy sale detail");
   }
@@ -34,6 +42,7 @@ export async function GET(request, { params }) {
 const patchSchema = z.object({
   action: z.literal("cancel"),
   reason: opt(300),
+  overridePin: z.string().trim().max(10).optional(),
 });
 
 export async function PATCH(request, { params }) {
@@ -44,13 +53,26 @@ export async function PATCH(request, { params }) {
     if (!isUuid(id)) return fail("Sale not found.", 404);
     const parsed = await parseBody(request, patchSchema);
     if (parsed.error) return parsed.error;
+    const actor = auth.ctx.actor;
 
     const result = await prisma.$transaction(async (tx) => {
       const found = await tx.pharmacySale.findFirst({
-        where: { id, ...authorityWhere(auth.ctx.actor) },
-        select: { id: true },
+        where: { id, ...authorityWhere(actor) },
+        select: { id: true, organizationId: true, branchId: true },
       });
       if (!found) return { error: fail("Sale not found.", 404) };
+      let overrideApprover = null;
+      if (actor.role === "STAFF" && !hasPermission(actor.permissions, "pos.void")) {
+        overrideApprover = await verifyManagerOverride(tx, {
+          organizationId: found.organizationId,
+          branchId: found.branchId,
+          pin: parsed.data.overridePin,
+          requiredPerm: "pos.void",
+        });
+        if (!overrideApprover) {
+          return { error: fail("Voiding sales requires pos.void permission or Manager PIN.", 403) };
+        }
+      }
       await tx.$queryRaw`SELECT id FROM "PharmacySale" WHERE id = ${id}::uuid FOR UPDATE`;
 
       const sale = await tx.pharmacySale.findUnique({ where: { id }, include: { items: true } });
@@ -110,6 +132,19 @@ export async function PATCH(request, { params }) {
           cancelReason: parsed.data.reason,
           refundedAmount: round2(Number(sale.refundedAmount) + netPaid),
         },
+      });
+      await logAudit({
+        tx,
+        organizationId: sale.organizationId,
+        branchId: sale.branchId,
+        userId: actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        action: "SALE_VOID",
+        resource: "PHARMACY_SALE",
+        resourceId: sale.id,
+        summary: `Voided ${sale.saleNo}${overrideApprover ? ` (PIN: ${overrideApprover.name})` : ""}`,
+        ip: clientIp(request),
       });
       return { ok: true };
     });

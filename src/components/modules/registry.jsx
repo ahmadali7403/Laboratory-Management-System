@@ -366,19 +366,20 @@ function StaffView({ scope }) {
       : roles.length === 0 ? <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">No staff roles exist yet. {scope.role === "BRANCH_ADMIN" ? "Ask your organization admin to create roles." : "Create roles under Roles & Permissions first."}</p> : null,
     canCreate: () => !needsOrg && roles.length > 0,
     columns: [
-      { label: "Name", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> }, { label: "Username", render: (r) => (r.username ? <span className="font-mono text-xs text-slate-600">{r.username}</span> : <span className="text-xs text-amber-600">No login</span>) }, { label: "Role", render: (r) => (r.role ? <Badge tone="blue">{r.role.name}</Badge> : "—") },
+      { label: "Name", render: (r) => <span className="font-semibold text-slate-800">{r.name}</span> }, { label: "Username", render: (r) => (r.username ? <span className="font-mono text-xs text-slate-600">{r.username}{r.hasPin && <Badge tone="green" className="ml-1">PIN</Badge>}</span> : <span className="text-xs text-amber-600">No login</span>) }, { label: "Role", render: (r) => (r.role ? <Badge tone="blue">{r.role.name}</Badge> : "—") },
       { label: "Branch", render: (r) => r.branch?.name || "—" }, { label: "Email", key: "email" }, { label: "Phone", key: "phone" },
       { label: "Status", render: (r) => <StatusBadge value={r.status} /> },
     ],
     form: {
       branch: "required",
-      toPayload: (v) => { const p = { ...v }; if (!p.email) delete p.email; if (!p.password) delete p.password; if (!p.username) delete p.username; return p; },
+      toPayload: (v) => { const p = { ...v }; if (!p.email) delete p.email; if (!p.password) delete p.password; if (!p.username) delete p.username; if (p.pin === "") delete p.pin; return p; },
       fields: [
         { name: "name", label: "Full name", required: true, mask: "name", span: 2 },
         { name: "roleId", label: "Role", type: "select", required: true, options: roles.map((r) => ({ value: r.id, label: r.branchName ? `${r.name} · ${r.branchName}` : `${r.name} · all branches` })), init: (row) => row.role?.id || "" },
         { name: "username", label: "Login username", required: true, maxLength: 30, init: (row) => row.username || "" },
         { name: "password", label: "Password", type: "password", required: true, createOnly: true, maxLength: 100 },
         { name: "password", label: "New password (blank = keep)", type: "password", editOnly: true, maxLength: 100, init: () => "" },
+        { name: "pin", label: "Quick / Override PIN (4-6 digits)", maxLength: 6, init: () => "" },
         { name: "email", label: "Email", type: "email", span: 2 }, { name: "phone", label: "Phone", mask: "phone", maxLength: 16 },
         { name: "status", label: "Status", type: "select", required: true, default: "ACTIVE", options: opts([["ACTIVE", "Active"], ["INACTIVE", "Inactive"]]), editOnly: true },
       ],

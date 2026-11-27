@@ -27,6 +27,8 @@ export default function MedicineTable({ scope }) {
   const confirm = useConfirm();
   const canManage = !scope.isStaff || hasModule(scope.permissions || [], "pharmacy_inventory", true);
   const canSuppliers = !scope.isStaff || hasModule(scope.permissions || [], "pharmacy_suppliers") || canManage;
+  const canSeedDefaults = !scope.isStaff;
+  const [seeding, setSeeding] = useState(false);
 
   const [q, setQ] = useState("");
   const dq = useDebounced(q, 250);
@@ -92,6 +94,22 @@ export default function MedicineTable({ scope }) {
     }
   }
 
+  async function seedDefaults() {
+    setSeeding(true);
+    try {
+      const r = await api("/api/pharmacy/medicines/seed-defaults", {
+        method: "POST",
+        body: scope.branchId ? { branchId: scope.branchId } : {},
+      });
+      toast.success(r.message);
+      load();
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setSeeding(false);
+    }
+  }
+
   return (
     <div className="space-y-2">
       <PageHeader
@@ -102,6 +120,11 @@ export default function MedicineTable({ scope }) {
             <Button variant="secondary" onClick={load} aria-label="Refresh">
               <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
             </Button>
+            {canSeedDefaults && (
+              <Button variant="secondary" loading={seeding} onClick={seedDefaults}>
+                Load 240 Common Medicines
+              </Button>
+            )}
             {canManage && (
               <Button onClick={() => setFormMed({})}>
                 <Plus size={15} /> Add Medicine
@@ -117,6 +140,7 @@ export default function MedicineTable({ scope }) {
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               autoFocus
+              data-search-input="true"
               value={q}
               onChange={(e) => { setQ(e.target.value); setPage(1); }}
               placeholder="Search name, generic, barcode, batch..."

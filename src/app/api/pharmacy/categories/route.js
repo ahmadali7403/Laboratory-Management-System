@@ -13,6 +13,7 @@ export const medicineCategories = createCrud({
   model: "medicineCategory",
   label: "Medicine category",
   orgWide: true,
+  cacheTtlMs: 30_000,
   dependents: ["medicines"],
   createSchema: schema,
   orderBy: [{ name: "asc" }],

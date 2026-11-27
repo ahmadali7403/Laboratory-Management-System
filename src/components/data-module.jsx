@@ -47,6 +47,7 @@ export default function DataModule({ config, scope }) {
   const [pageSize, setPageSize] = useState(10);
   const [ready, setReady] = useState(false); // page size is read from the browser before the first request
   const [tick, setTick] = useState(0);
+  const [rowIdx, setRowIdx] = useState(-1);
   const [state, setState] = useState({
     key: "",
     error: "",
@@ -218,16 +219,32 @@ export default function DataModule({ config, scope }) {
             />
             <input
               autoFocus
+              data-search-input="true"
               value={q}
               onChange={(e) => {
                 setQ(e.target.value);
                 setPage(1);
+                setRowIdx(-1);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Escape" && q) {
                   e.preventDefault();
                   setQ("");
                   setPage(1);
+                  setRowIdx(-1);
+                } else if (e.key === "ArrowDown" && view.items.length) {
+                  e.preventDefault();
+                  setRowIdx((r) => Math.min(view.items.length - 1, r + 1));
+                } else if (e.key === "ArrowUp" && view.items.length) {
+                  e.preventDefault();
+                  setRowIdx((r) => Math.max(0, r - 1));
+                } else if (e.key === "Enter" && rowIdx >= 0 && view.items[rowIdx]) {
+                  e.preventDefault();
+                  const row = view.items[rowIdx];
+                  const act = (config.rowActions || []).find((a) => (!a.show || a.show(row, scope)) && a.label !== "View")
+                    || (config.rowActions || []).find((a) => !a.show || a.show(row, scope));
+                  if (act?.href) router.push(act.href(row));
+                  else if (act?.onClick) act.onClick(row, ctx);
                 }
               }}
               placeholder={config.searchPlaceholder || "Search..."}
@@ -398,7 +415,7 @@ export default function DataModule({ config, scope }) {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {view.items.map((row, idx) => (
-                        <tr key={row.id} className="hover:bg-slate-50/60">
+                        <tr key={row.id} onClick={() => setRowIdx(idx)} className={idx === rowIdx ? "bg-blue-50/80 ring-1 ring-inset ring-blue-400" : "hover:bg-slate-50/60"}>
                           <td className="px-2 py-1 text-center text-xs font-semibold tabular-nums text-slate-400">
                             {(page - 1) * pageSize + idx + 1}
                           </td>

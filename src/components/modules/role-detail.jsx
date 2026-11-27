@@ -23,6 +23,13 @@ function RoleBody({ role, compact = false }) {
         <Badge tone={role.branchId ? "violet" : "blue"}>{role.branchId ? `Branch: ${role.branchName}` : "Organization-wide"}</Badge>
         {role.isSystem && <Badge tone="gray">System role (all permissions)</Badge>}
         {!role.editable && !role.isSystem && <Badge tone="amber">Read only for you</Badge>}
+        {!role.isSystem && (
+          <>
+            <Badge tone="green">Max Discount: {Number(role.maxDiscountPct ?? 100)}%</Badge>
+            <Badge tone={role.canEditPrice !== false ? "blue" : "gray"}>{role.canEditPrice !== false ? "Price edit: Yes" : "Price edit: No"}</Badge>
+            {role.requireShift && <Badge tone="amber">Shift Required</Badge>}
+          </>
+        )}
       </div>
       <div className={compact ? "space-y-3" : "grid gap-3 md:grid-cols-2"}>
         <section className="rounded-xl border border-slate-200 bg-white p-3">

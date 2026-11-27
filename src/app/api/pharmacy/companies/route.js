@@ -15,6 +15,7 @@ export const medicineCompanies = createCrud({
   model: "medicineCompany",
   label: "Medicine company",
   orgWide: true,
+  cacheTtlMs: 30_000,
   dependents: ["medicines"],
   createSchema: schema,
   orderBy: [{ name: "asc" }],

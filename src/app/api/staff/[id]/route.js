@@ -3,8 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_NAMES, apiContext, authorityWhere } from "@/lib/scope";
 import { fail, handleError, isUuid, json, opt, parseBody, req, uuid } from "@/lib/http";
 import bcrypt from "bcryptjs";
-import { passwordField, personName, phoneField, usernameField } from "@/lib/validators";
+import { passwordField, personName, phoneField, pinField, usernameField } from "@/lib/validators";
 import { usernameTaken } from "@/lib/usernames";
+import { memoDelete } from "@/lib/memo";
 
 const schema = z.object({
   name: personName("Name").optional(),
@@ -14,6 +15,7 @@ const schema = z.object({
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
   username: usernameField.optional(),
   password: passwordField.optional().or(z.literal("").transform(() => undefined)),
+  pin: pinField.optional(),
 });
 
 async function findStaff(actor, id) {
@@ -38,9 +40,10 @@ export async function PATCH(request, { params }) {
     if (!staff) return fail("Staff member not found.", 404);
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
-    const { roleId, password, ...rest } = parsed.data;
+    const { roleId, password, pin, ...rest } = parsed.data;
     if (rest.username && (await usernameTaken(rest.username, staff.id))) return fail("This username is already taken. Choose another one.", 409);
     if (password) rest.password = await bcrypt.hash(password, 10);
+    if (pin !== undefined) rest.pinHash = pin ? await bcrypt.hash(pin, 10) : null;
 
     await prisma.$transaction(async (tx) => {
       if (roleId) {
@@ -51,6 +54,7 @@ export async function PATCH(request, { params }) {
       }
       if (Object.keys(rest).length) await tx.user.update({ where: { id: staff.id }, data: rest });
     });
+    memoDelete(`perms:${staff.id}`);
     return json({ message: "Staff member updated." });
   } catch (error) {
     return handleError(error, "Staff update", "A staff member with this email already exists.");

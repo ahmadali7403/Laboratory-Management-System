@@ -1,97 +1,113 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Footprints, Plus, Printer, RotateCcw, Search, UserRound, X } from "lucide-react";
+import dynamic from "next/dynamic";
+import { Check, Clock, Footprints, HelpCircle, Moon, Plus, Printer, RotateCcw, Sun, Trash2, UserRound, X, Zap } from "lucide-react";
 import { api, formatMoney } from "@/lib/client";
 import { Select, Spinner, useDebounced, useToast } from "@/components/ui";
 import { NAME_RE, NAME_MESSAGE, PHONE_MESSAGE, cleanPersonName, cleanPhoneInput, normalizePhone } from "@/lib/validators";
+import { createScannerDetector } from "@/lib/shortcuts";
+import { holdBill, loadHeldBills, removeHeldBill } from "@/lib/pos-hold";
+import { usePosKeyboard } from "@/lib/use-pos-keyboard";
+import { usePosTheme } from "@/lib/use-pos-theme";
+import { fetchTestCatalog, loadPosCatalog, searchTestsLocal } from "@/lib/pos-cache";
+import { printLabReceipt } from "@/lib/fast-print";
+import VirtualRows from "@/components/virtual-rows";
+import { KeyBadge, ShortcutBar } from "@/components/shortcut-bar";
+import SearchBar from "@/components/pos/SearchBar";
+import CartPanel from "@/components/pos/CartPanel";
+import TotalsCard from "@/components/pos/TotalsCard";
+import PaymentChips from "@/components/pos/PaymentChips";
 
-const METHODS = [["CASH", "Cash"], ["CARD", "Card"], ["BANK_TRANSFER", "Bank transfer"], ["ONLINE", "Online"]];
-const ic = "h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-[13px] text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100";
+const HeldBillsModal = dynamic(() => import("@/components/held-bills-modal"), { ssr: false });
+const PinOverrideModal = dynamic(() => import("@/components/pos/PinOverrideModal"), { ssr: false });
+
+const METHODS = [["CASH", "Cash"], ["CARD", "Card"], ["JAZZCASH", "JazzCash"], ["EASYPAISA", "EasyPaisa"], ["BANK_TRANSFER", "Bank"], ["ONLINE", "Online"]];
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 const EMPTY_WALK = { name: "", gender: "MALE", ageYears: "", phone: "" };
 
-const L = ({ label, children, className = "" }) => (
-  <label className={`block ${className}`}>
-    <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</span>
-    {children}
-  </label>
-);
-
 /**
- * Counter-style (POS) screen for creating a laboratory order.
- * Everything happens on this one page: patient (registered or walk-in), tests, discount,
- * payment and printing. Shortcuts: F2 = search tests, F8 = save, F9 = save & print (direct print).
+ * Zero-scroll 3-zone Laboratory POS screen matching Pharmacy POS architecture.
  */
 export default function PosOrder({ scope }) {
   const toast = useToast();
+  const { theme, isDark, toggleTheme } = usePosTheme();
+  const limits = scope.roleLimits || { maxDiscountPct: 100, allowedMethods: [], canDiscount: true };
+  const allowedMethods = useMemo(
+    () => (limits.allowedMethods?.length ? METHODS.filter(([v]) => limits.allowedMethods.includes(v)) : METHODS),
+    [limits.allowedMethods],
+  );
+  const allowedMethodValues = useMemo(() => allowedMethods.map(([v]) => v), [allowedMethods]);
   const needsPick = scope.role !== "BRANCH_ADMIN" && !scope.branchId;
   const [picked, setPicked] = useState("");
   const branchId = scope.branchId || picked;
 
-  // reference data
-  const [testsState, setTestsState] = useState({ branchId: "", items: [] });
-  const tests = testsState.branchId === branchId ? testsState.items : [];
+  const [testsState, setTestsState] = useState({ branchId: "", items: [], syncing: false });
+  const tests = useMemo(() => (testsState.branchId === branchId ? testsState.items : []), [testsState, branchId]);
   const loadingTests = Boolean(branchId) && testsState.branchId !== branchId;
 
-  // patient (Walk-in Customer by default)
   const [walk, setWalk] = useState(() =>
     typeof window !== "undefined" && new URLSearchParams(window.location.search).get("registered") === "1" ? false : true,
   );
   const [wi, setWi] = useState(EMPTY_WALK);
   const [patientQ, setPatientQ] = useState("");
-  const dPatientQ = useDebounced(patientQ, 250);
+  const dPatientQ = useDebounced(patientQ, 220);
   const [patients, setPatients] = useState([]);
   const [patient, setPatient] = useState(null);
-  const [searchingPatients, setSearchingPatients] = useState(false);
 
-  // order
   const [notes, setNotes] = useState("");
   const [cart, setCart] = useState([]);
+  const [undoStack, setUndoStack] = useState([]);
+  const [cartIdx, setCartIdx] = useState(0);
+  const [holdModalOpen, setHoldModalOpen] = useState(false);
+  const [heldBills, setHeldBills] = useState([]);
   const [testQ, setTestQ] = useState("");
+  const deferredTestQ = useDeferredValue(testQ);
   const [hi, setHi] = useState(0);
   const [category, setCategory] = useState("");
   const [discType, setDiscType] = useState("RS");
   const [discValue, setDiscValue] = useState("");
   const [payTouched, setPayTouched] = useState(false);
   const [payAmount, setPayAmount] = useState("");
-  const [method, setMethod] = useState("CASH");
+  const [method, setMethod] = useState(() => (limits.allowedMethods?.length ? limits.allowedMethods[0] : "CASH"));
+  const [pinModal, setPinModal] = useState(null);
   const [reference, setReference] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [last, setLast] = useState(null);
 
-  const [nowTs] = useState(() => Date.now());
   const testBox = useRef(null);
-  const testListRef = useRef(null);
+  const walkNameRef = useRef(null);
+  const patientToggleRef = useRef(null);
+  const discountRef = useRef(null);
+  const scannerRef = useRef(null);
 
-  // ---- load tests for the branch (tests are filtered locally = instant search) ----
   useEffect(() => {
-    if (!branchId) return;
-    let stop = false;
-    (async () => {
-      try {
-        const url = (page) => `/api/tests?branchId=${branchId}&active=1&light=1&pageSize=100&page=${page}`;
-        const first = await api(url(1));
-        const pages = Math.min(30, Math.ceil(first.total / 100));
-        const rest = await Promise.all(Array.from({ length: Math.max(0, pages - 1) }, (_, i) => api(url(i + 2))));
-        if (!stop) setTestsState({ branchId, items: [...first.items, ...rest.flatMap((d) => d.items)] });
-      } catch {
-        if (!stop) setTestsState({ branchId, items: [] });
-      }
-    })();
-    return () => { stop = true; };
+    const id = setTimeout(() => setHeldBills(loadHeldBills("lab", branchId)), 0);
+    return () => clearTimeout(id);
   }, [branchId]);
 
-  // ---- patient search ----
+  useEffect(() => {
+    if (!branchId) return;
+    const ctrl = new AbortController();
+    loadPosCatalog("tests", branchId, fetchTestCatalog, {
+      signal: ctrl.signal,
+      onUpdate: (items, meta) => {
+        if (!ctrl.signal.aborted) {
+          setTestsState({ branchId, items, syncing: Boolean(meta?.syncing) });
+        }
+      },
+    });
+    return () => ctrl.abort();
+  }, [branchId]);
+
   useEffect(() => {
     if (!branchId || walk) return;
     let stop = false;
     api(`/api/patients?branchId=${branchId}&pageSize=30&q=${encodeURIComponent(dPatientQ.trim())}`)
-      .then((d) => !stop && setPatients(d.items))
-      .catch(() => {})
-      .finally(() => !stop && setSearchingPatients(false));
+      .then((d) => !stop && setPatients(d.items || []))
+      .catch(() => {});
     return () => { stop = true; };
   }, [branchId, dPatientQ, walk]);
 
@@ -100,45 +116,63 @@ export default function PosOrder({ scope }) {
     return patient && !list.some((p) => p.id === patient.id) ? [patient, ...list] : list;
   }, [patient, patients, branchId, walk]);
 
-  // ---- tests ----
   const categories = useMemo(() => [...new Set(tests.map((t) => t.category).filter(Boolean))].sort(), [tests]);
+  const quickTests = useMemo(() => tests.slice(0, 6), [tests]);
   const inCart = useMemo(() => new Set(cart.map((t) => t.id)), [cart]);
-  const matches = useMemo(() => {
-    const q = testQ.trim().toLowerCase();
-    const filtered = tests.filter(
-      (t) => (!category || t.category === category) && (!q || t.name.toLowerCase().includes(q) || t.code.toLowerCase().includes(q)),
-    );
-    if (q) {
-      filtered.sort((a, b) => {
-        const ac = a.code.toLowerCase(), bc = b.code.toLowerCase();
-        const an = a.name.toLowerCase(), bn = b.name.toLowerCase();
-        const score = (c, n) => (c === q ? 0 : c.startsWith(q) ? 1 : n.startsWith(q) ? 2 : 3);
-        return score(ac, an) - score(bc, bn);
-      });
-    }
-    return filtered.slice(0, 60);
-  }, [tests, testQ, category]);
-
+  const matches = useMemo(
+    () => searchTestsLocal(tests, deferredTestQ, category, 200),
+    [tests, deferredTestQ, category],
+  );
   const safeHi = matches.length ? Math.min(hi, matches.length - 1) : 0;
 
-  useEffect(() => {
-    testListRef.current?.querySelector(`[data-test-idx="${safeHi}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [safeHi, matches.length]);
+  const pushUndo = useCallback((snapshot) => {
+    setUndoStack((u) => [snapshot, ...u].slice(0, 15));
+  }, []);
 
-  const addTest = useCallback((t) => setCart((c) => (c.some((x) => x.id === t.id) ? c : [...c, t])), []);
-  const toggleTest = useCallback((t) => setCart((c) => (c.some((x) => x.id === t.id) ? c.filter((x) => x.id !== t.id) : [...c, t])), []);
-  const removeTest = (id) => setCart((c) => c.filter((x) => x.id !== id));
+  const addTest = useCallback((t) => {
+    setCart((c) => {
+      if (c.some((x) => x.id === t.id)) return c;
+      pushUndo(c);
+      setCartIdx(c.length);
+      return [...c, t];
+    });
+  }, [pushUndo]);
 
-  // ---- money ----
+  const toggleTest = useCallback((t) => {
+    setCart((c) => {
+      pushUndo(c);
+      if (c.some((x) => x.id === t.id)) return c.filter((x) => x.id !== t.id);
+      setCartIdx(c.length);
+      return [...c, t];
+    });
+  }, [pushUndo]);
+
+  const removeTest = (id) => setCart((c) => {
+    pushUndo(c);
+    const next = c.filter((x) => x.id !== id);
+    setCartIdx((i) => Math.max(0, Math.min(i, next.length - 1)));
+    return next;
+  });
+
+  function handleUndo() {
+    setUndoStack((u) => {
+      if (!u.length) return u;
+      const [latest, ...rest] = u;
+      setCart(latest);
+      setCartIdx((i) => Math.max(0, Math.min(i, latest.length - 1)));
+      toast.info("Undid last test change.");
+      return rest;
+    });
+    setTimeout(() => testBox.current?.focus(), 0);
+  }
+
   const subtotal = round2(cart.reduce((s, t) => s + Number(t.price), 0));
   const discRs = Math.min(subtotal, round2(discType === "PCT" ? (subtotal * Math.min(100, Number(discValue) || 0)) / 100 : Number(discValue) || 0));
   const total = round2(subtotal - discRs);
-  // until the cashier types an amount, the full total is taken as paid (usual counter flow)
   const paid = payTouched ? round2(payAmount) : total;
   const balance = round2(Math.max(0, total - paid));
   const change = round2(Math.max(0, paid - total));
 
-  // ---- save ----
   function validate() {
     if (needsPick && !picked) return "Please select a branch.";
     if (walk) {
@@ -151,33 +185,7 @@ export default function PosOrder({ scope }) {
     return "";
   }
 
-  async function save(print) {
-    if (saving) return;
-    const problem = validate();
-    if (problem) { setError(problem); toast.error(problem); return; }
-    setSaving(true); setError("");
-    try {
-      const walkName = wi.name.trim() || "Walk-in Customer";
-      const body = {
-        ...(walk
-          ? { walkIn: { name: walkName, gender: wi.gender, ageYears: wi.ageYears === "" ? null : Number(wi.ageYears), phone: wi.phone || null } }
-          : { patientId: patient.id }),
-        testIds: cart.map((t) => t.id),
-        discount: discRs,
-        notes,
-        ...(needsPick ? { branchId: picked } : {}),
-      };
-      if (Math.min(paid, total) > 0) body.payment = { amount: Math.min(paid, total), method, reference: reference || undefined };
-      const res = await api("/api/orders", { method: "POST", body });
-      toast.success(`Order ${res.orderNo} created.`);
-      setLast({ id: res.id, orderNo: res.orderNo, total, balance });
-      if (print) printInvoice(res.id);
-      reset();
-    } catch (err) { setError(err.message); } finally { setSaving(false); }
-  }
-
-  // Prints the invoice straight from a hidden frame - no new tab, no extra click.
-  function printInvoice(id) {
+  function printA4Invoice(id) {
     const f = document.createElement("iframe");
     f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
     f.src = `/embed/invoice/${id}`;
@@ -189,243 +197,648 @@ export default function PosOrder({ scope }) {
   }
 
   function reset() {
-    setCart([]); setPatient(null); setPatientQ(""); setPatients([]); setWi(EMPTY_WALK);
+    setCart([]);
+    setUndoStack([]);
+    setPatient(null);
+    setPatientQ("");
+    setPatients([]);
+    setWi(EMPTY_WALK);
     setWalk(true);
-    setNotes(""); setDiscValue(""); setPayTouched(false); setPayAmount(""); setReference("");
-    setTestQ(""); setHi(0); setError("");
-    setTimeout(() => testBox.current?.focus(), 50);
+    setNotes("");
+    setDiscValue("");
+    setPayTouched(false);
+    setPayAmount("");
+    setReference("");
+    setTestQ("");
+    setHi(0);
+    setError("");
+    setTimeout(() => testBox.current?.focus(), 40);
   }
 
-  // keep the latest handlers reachable from the keyboard listener
-  const saveRef = useRef(save);
-  useEffect(() => {
-    saveRef.current = save;
-  });
-  useEffect(() => {
-    function onKey(e) {
-      if (e.key === "F2") { e.preventDefault(); testBox.current?.focus(); testBox.current?.select(); }
-      else if (e.key === "F8") { e.preventDefault(); saveRef.current(false); }
-      else if (e.key === "F9") { e.preventDefault(); saveRef.current(true); }
+  async function save(print, overridePin = undefined) {
+    if (saving) return;
+    const problem = validate();
+    if (problem) { setError(problem); toast.error(problem); return; }
+    const discPct = subtotal > 0 ? round2((discRs / subtotal) * 100) : 0;
+    if (scope.isStaff && discRs > 0 && !overridePin) {
+      if (!limits.canDiscount || discPct > Number(limits.maxDiscountPct ?? 100) + 0.01) {
+        setPinModal({ print });
+        return;
+      }
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    setSaving(true);
+    setError("");
+    try {
+      const walkName = wi.name.trim() || "Walk-in Customer";
+      const body = {
+        ...(walk
+          ? { walkIn: { name: walkName, gender: wi.gender, ageYears: wi.ageYears === "" ? null : Number(wi.ageYears), phone: wi.phone || null } }
+          : { patientId: patient.id }),
+        testIds: cart.map((t) => t.id),
+        discount: discRs,
+        notes,
+        ...(overridePin ? { overridePin } : {}),
+        ...(needsPick ? { branchId: picked } : {}),
+      };
+      if (Math.min(paid, total) > 0) body.payment = { amount: Math.min(paid, total), method, reference: reference || undefined };
+      const res = await api("/api/orders", { method: "POST", body });
+      toast.success(`Order ${res.orderNo} created.`);
+      const activeBranch = scope.branches?.find((b) => b.id === branchId);
+      setLast({ id: res.id, orderNo: res.orderNo, total, balance });
+      if (print) {
+        printLabReceipt({
+          orgName: activeBranch?.organizationName || "Diagnostic Laboratory",
+          branchName: activeBranch?.name || "",
+          orderNo: res.orderNo,
+          patientName: walk ? walkName : patient?.name || "Registered Patient",
+          phone: walk ? wi.phone : patient?.phone || "",
+          items: cart,
+          subtotal,
+          discount: discRs,
+          total,
+          paidAmount: Math.min(paid, total),
+          balance,
+          paymentMethod: method,
+        });
+      }
+      reset();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleHoldCurrent() {
+    if (!branchId || !cart.length) return;
+    const label = !walk && patient ? patient.name : wi.name.trim() || "Walk-in Customer";
+    const next = holdBill("lab", branchId, {
+      label,
+      itemCount: cart.length,
+      total,
+      payload: { cart, walk, wi, patient, discType, discValue, method, notes },
+    });
+    setHeldBills(next);
+    setHoldModalOpen(false);
+    toast.success(`Held order for ${label}.`);
+    reset();
+  }
+
+  function handleResumeBill(bill) {
+    const p = bill.payload || {};
+    setCart(Array.isArray(p.cart) ? p.cart : []);
+    setWalk(p.walk ?? true);
+    setWi(p.wi || EMPTY_WALK);
+    setPatient(p.patient || null);
+    setDiscType(p.discType || "RS");
+    setDiscValue(p.discValue || "");
+    setMethod(p.method || "CASH");
+    setNotes(p.notes || "");
+    setUndoStack([]);
+    setCartIdx(0);
+    setHeldBills(removeHeldBill("lab", branchId, bill.id));
+    setHoldModalOpen(false);
+    toast.success("Resumed held lab bill.");
+    setTimeout(() => testBox.current?.focus(), 30);
+  }
+
+  usePosKeyboard({
+    onNewSale: reset,
+    onFocusSearch: () => { testBox.current?.focus(); testBox.current?.select?.(); },
+    onFocusCustomer: () => {
+      if (walk && walkNameRef.current) {
+        walkNameRef.current.focus();
+        walkNameRef.current.select?.();
+      } else {
+        patientToggleRef.current?.focus();
+      }
+    },
+    onHoldOrResume: () => {
+      if (!branchId) return;
+      if (cart.length > 0 && heldBills.length === 0) handleHoldCurrent();
+      else setHoldModalOpen(true);
+    },
+    onFocusDiscount: () => { discountRef.current?.focus(); discountRef.current?.select?.(); },
+    onCycleMethod: () => {
+      const idx = allowedMethodValues.indexOf(method);
+      setMethod(allowedMethodValues[(idx + 1) % allowedMethodValues.length]);
+    },
+    onSaveAndPrint: () => save(true),
+    onSaveOnly: () => save(false),
+    onRemoveSelected: () => {
+      if (cart.length > 0 && cart[cartIdx]) removeTest(cart[cartIdx].id);
+    },
+    onUndo: handleUndo,
+    onEscape: () => {
+      if (testQ) { setTestQ(""); setHi(0); }
+      else testBox.current?.focus();
+    },
+  });
 
   const ready = Boolean(branchId);
 
   return (
-    <div className="space-y-1.5">
-      {last && (
-        <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs text-emerald-800">
-          <Check size={14} /> <b>{last.orderNo}</b> saved · {formatMoney(last.total)}{last.balance > 0 ? ` · due ${formatMoney(last.balance)}` : ""}
-          <button type="button" onClick={() => printInvoice(last.id)} className="ml-1 inline-flex items-center gap-1 rounded bg-white px-1.5 py-0.5 font-semibold text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100"><Printer size={12} /> Print</button>
-          <button type="button" onClick={() => setLast(null)} aria-label="Dismiss" className="ml-auto text-emerald-600 hover:text-emerald-900"><X size={14} /></button>
-        </div>
-      )}
+    <div
+      data-pos-theme={theme}
+      className="pos-theme flex h-full min-h-0 w-full flex-col overflow-hidden"
+    >
+      {/* Top Compact Patient & Controls Bar */}
+      <header className="pos-surface flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-extrabold uppercase tracking-wider text-blue-500">
+            Lab POS
+          </span>
 
-      {needsPick && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-          <L label="Branch" className="max-w-xs">
-            <select className={ic} value={picked} onChange={(e) => { setPicked(e.target.value); setCart([]); setPatient(null); }}>
-              <option value="">Select a branch</option>
-              {scope.branches.map((b) => <option key={b.id} value={b.id}>{scope.role === "SUPER_ADMIN" && !scope.organizationId ? `${b.organizationName} — ${b.name}` : b.name}</option>)}
+          {needsPick && (
+            <select
+              className="pos-input h-7 rounded-md border px-2 text-xs font-semibold"
+              value={picked}
+              onChange={(e) => { setPicked(e.target.value); setCart([]); setPatient(null); }}
+              aria-label="Branch"
+            >
+              <option value="">Select branch...</option>
+              {scope.branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {scope.role === "SUPER_ADMIN" && !scope.organizationId ? `${b.organizationName} — ${b.name}` : b.name}
+                </option>
+              ))}
             </select>
-          </L>
-        </div>
-      )}
+          )}
 
-      <div className="grid gap-1.5 lg:grid-cols-[minmax(0,1fr)_310px]">
-        {/* ---------------- left: patient + tests ---------------- */}
-        <div className="min-w-0 space-y-1.5">
-          <section className="rounded-lg border border-slate-200 bg-white p-2">
-            <div className="mb-1.5 flex items-center justify-between">
-              <div className="inline-flex rounded-md border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold">
-                <button type="button" onClick={() => { setWalk(true); setPatient(null); }} className={`flex items-center gap-1 rounded px-2.5 py-1 ${walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}><Footprints size={12} /> Walk-in (Default)</button>
-                <button type="button" onClick={() => setWalk(false)} className={`flex items-center gap-1 rounded px-2.5 py-1 ${!walk ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}><UserRound size={12} /> Registered</button>
-              </div>
-              <Link href="/patients?new=1" className="text-[11px] font-semibold text-blue-600 hover:underline">+ Register new patient</Link>
+          <div className="pos-surface-alt inline-flex rounded-md border p-0.5 text-[11px] font-semibold">
+            <button
+              type="button"
+              onClick={() => { setWalk(true); setPatient(null); }}
+              className={`flex items-center gap-1 rounded px-2 py-0.5 transition ${walk ? "bg-blue-600 text-white shadow-sm" : "opacity-70 hover:opacity-100"}`}
+            >
+              <Footprints size={11} /> Walk-in
+            </button>
+            <button
+              ref={patientToggleRef}
+              type="button"
+              onClick={() => setWalk(false)}
+              className={`flex items-center gap-1 rounded px-2 py-0.5 transition ${!walk ? "bg-blue-600 text-white shadow-sm" : "opacity-70 hover:opacity-100"}`}
+            >
+              <UserRound size={11} /> Registered <KeyBadge dark={isDark}>F4</KeyBadge>
+            </button>
+          </div>
+
+          {walk ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <input
+                ref={walkNameRef}
+                className="pos-input h-7 w-36 rounded border px-2 text-xs outline-none focus:border-blue-500"
+                value={wi.name}
+                maxLength={120}
+                placeholder="Walk-in Customer"
+                disabled={!ready}
+                onChange={(e) => setWi({ ...wi, name: cleanPersonName(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); testBox.current?.focus(); } }}
+              />
+              <input
+                className="pos-input hidden h-7 w-28 rounded border px-2 text-xs outline-none focus:border-blue-500 sm:block"
+                inputMode="numeric"
+                value={wi.phone}
+                maxLength={16}
+                placeholder="03XXXXXXXXX"
+                disabled={!ready}
+                onChange={(e) => setWi({ ...wi, phone: cleanPhoneInput(e.target.value) })}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); testBox.current?.focus(); } }}
+              />
+              <input
+                className="pos-input hidden h-7 w-14 rounded border px-1.5 text-center text-xs outline-none focus:border-blue-500 md:block"
+                type="number"
+                min="0"
+                max="120"
+                placeholder="Age"
+                value={wi.ageYears}
+                disabled={!ready}
+                onChange={(e) => setWi({ ...wi, ageYears: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); testBox.current?.focus(); } }}
+              />
+              <select
+                className="pos-input hidden h-7 rounded border px-1.5 text-xs outline-none focus:border-blue-500 md:block"
+                value={wi.gender}
+                disabled={!ready}
+                aria-label="Gender"
+                onChange={(e) => setWi({ ...wi, gender: e.target.value })}
+              >
+                <option value="MALE">Male</option>
+                <option value="FEMALE">Female</option>
+                <option value="OTHER">Other</option>
+              </select>
             </div>
-
-            {walk ? (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-12">
-                <L label="Patient name (optional)" className="col-span-2 sm:col-span-4"><input className={ic} value={wi.name} maxLength={120} placeholder="Walk-in Customer" disabled={!ready} onChange={(e) => setWi({ ...wi, name: cleanPersonName(e.target.value) })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); testBox.current?.focus(); } }} /></L>
-                <L label="Phone" className="col-span-2 sm:col-span-4"><input className={ic} inputMode="numeric" value={wi.phone} maxLength={16} placeholder="03XXXXXXXXX" disabled={!ready} onChange={(e) => setWi({ ...wi, phone: cleanPhoneInput(e.target.value) })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); testBox.current?.focus(); } }} /></L>
-                <L label="Age" className="sm:col-span-2"><input className={ic} type="number" min="0" max="120" value={wi.ageYears} disabled={!ready} onChange={(e) => setWi({ ...wi, ageYears: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); testBox.current?.focus(); } }} /></L>
-                <L label="Gender" className="sm:col-span-2"><select className={ic} value={wi.gender} disabled={!ready} onChange={(e) => setWi({ ...wi, gender: e.target.value })}><option value="MALE">Male</option><option value="FEMALE">Female</option><option value="OTHER">Other</option></select></L>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <Select value={patient?.id || ""} onChange={(e) => { const p = patientOptions.find((x) => x.id === e.target.value) || null; setPatient(p); if (p) setWalk(false); }} onSearch={setPatientQ} className={ic} disabled={!ready}>
-                  <option value="">Select patient (type name, MRN or phone)...</option>
-                  {patientOptions.map((p) => <option key={p.id} value={p.id}>{p.name} · {p.mrn}{p.phone ? ` · ${p.phone}` : ""}</option>)}
-                </Select>
-                {patient && (
-                  <div className="flex items-center justify-between gap-2 rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-[11px] text-slate-700">
-                    <p><b className="text-slate-800">{patient.name}</b> · {patient.mrn} · {patient.gender}{patient.dateOfBirth ? ` · ${Math.max(0, Math.floor((nowTs - new Date(patient.dateOfBirth)) / 3.156e10))}y` : ""}{patient.phone ? ` · ${patient.phone}` : ""}</p>
-                    <button type="button" onClick={() => { setPatient(null); setWalk(true); }} className="shrink-0 font-semibold text-blue-700 hover:underline">Restore Walk-in</button>
-                  </div>
-                )}
-              </div>
-            )}
-
-          </section>
-
-          <div className="grid gap-1.5 md:grid-cols-2">
-            <section className="min-w-0 rounded-lg border border-slate-200 bg-white p-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
-                <input
-                  ref={testBox}
-                  autoFocus
-                  className={`${ic} pl-8`}
-                  placeholder="Search test / scan code — ↑↓ navigate, Enter adds"
-                  value={testQ}
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <div className="w-56">
+                <Select
+                  value={patient?.id || ""}
+                  onChange={(e) => { const p = patientOptions.find((x) => x.id === e.target.value) || null; setPatient(p); if (p) setWalk(false); }}
+                  onSearch={setPatientQ}
+                  className="!h-7 !text-xs"
                   disabled={!ready}
-                  onChange={(e) => { setTestQ(e.target.value); setHi(0); }}
-                  onKeyDown={(e) => {
-                    if (e.key === "ArrowDown") {
-                      e.preventDefault();
-                      setHi((i) => Math.min(Math.max(0, matches.length - 1), i + 1));
-                    } else if (e.key === "ArrowUp") {
-                      e.preventDefault();
-                      setHi((i) => Math.max(0, i - 1));
-                    } else if (e.key === "Enter") {
-                      e.preventDefault();
-                      const chosen = matches[safeHi] || matches[0];
-                      if (chosen) {
-                        addTest(chosen);
-                        setTestQ("");
-                        setHi(0);
-                        testBox.current?.focus();
-                      }
-                    } else if (e.key === "Escape" && testQ) {
-                      e.preventDefault();
-                      setTestQ("");
-                      setHi(0);
-                    }
+                >
+                  <option value="">Search patient (name, MRN, phone)...</option>
+                  {patientOptions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name} · {p.mrn}{p.phone ? ` · ${p.phone}` : ""}</option>
+                  ))}
+                </Select>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setPatient(null); setWalk(true); }}
+                className="text-[11px] font-semibold text-blue-500 hover:underline"
+              >
+                Walk-in
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 text-[11px]">
+          {last && (
+            <div className="hidden items-center gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-emerald-500 xl:flex">
+              <Check size={12} />
+              <span className="font-bold">{last.orderNo}</span>
+              <span className="tabular-nums">{formatMoney(last.total)}</span>
+              <button type="button" onClick={() => printA4Invoice(last.id)} className="underline hover:opacity-80">A4</button>
+              <button type="button" onClick={() => setLast(null)} aria-label="Dismiss"><X size={12} /></button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setHoldModalOpen(true)}
+            className="pos-surface-alt inline-flex h-7 items-center gap-1 rounded-md border px-2 font-semibold hover:opacity-80"
+          >
+            <Clock size={12} /> Held ({heldBills.length}) <KeyBadge dark={isDark}>F5</KeyBadge>
+          </button>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            aria-label={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            className="pos-surface-alt inline-flex h-7 w-7 items-center justify-center rounded-md border hover:opacity-80"
+          >
+            {isDark ? <Sun size={13} className="text-amber-400" /> : <Moon size={13} />}
+          </button>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new Event("labos:help"))}
+            title="Shortcuts Help (F1)"
+            className="pos-surface-alt inline-flex h-7 items-center gap-1 rounded-md border px-2 font-semibold hover:opacity-80"
+          >
+            <HelpCircle size={12} /> <KeyBadge dark={isDark}>F1</KeyBadge>
+          </button>
+          <Link href="/orders" className="hidden font-semibold hover:text-blue-500 md:inline" style={{ color: "var(--pos-muted)" }}>
+            Orders
+          </Link>
+        </div>
+      </header>
+
+      {/* Main 3-Zone Workspace */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-2 overflow-hidden p-2 lg:grid-cols-[minmax(0,1.62fr)_minmax(345px,1fr)]">
+        {/* Left Zone: Search + Quick Categories/Cards + Virtualized Tests Grid */}
+        <section className="flex min-h-0 min-w-0 flex-col gap-1.5 overflow-hidden">
+          <SearchBar
+            inputRef={testBox}
+            value={testQ}
+            disabled={!ready}
+            syncing={testsState.syncing}
+            dark={isDark}
+            countText={matches.length > 0 ? `${matches.length} tests` : ""}
+            ariaLabel="Search lab test"
+            onChange={(e) => { setTestQ(e.target.value); setHi(0); }}
+            onKeyDown={(e) => {
+              if (!scannerRef.current) scannerRef.current = createScannerDetector();
+              scannerRef.current.recordKey(e.key);
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                setHi((i) => Math.min(Math.max(0, matches.length - 1), i + 1));
+              } else if (e.key === "ArrowUp") {
+                e.preventDefault();
+                setHi((i) => Math.max(0, i - 1));
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                scannerRef.current.consumeScanEnter();
+                const chosen = matches[safeHi] || matches[0];
+                if (chosen) {
+                  addTest(chosen);
+                  setTestQ("");
+                  setHi(0);
+                  testBox.current?.focus();
+                }
+              } else if (e.key === "Escape" && testQ) {
+                e.preventDefault();
+                scannerRef.current.reset();
+                setTestQ("");
+                setHi(0);
+              }
+            }}
+            onClear={() => { setTestQ(""); setHi(0); testBox.current?.focus(); }}
+            placeholder="Search test name or code — ↑↓ navigate, Enter adds"
+          />
+
+          {categories.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => { setCategory(""); setHi(0); testBox.current?.focus(); }}
+                className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                  !category ? "bg-blue-600 text-white" : isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                All ({tests.length})
+              </button>
+              {categories.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  tabIndex={-1}
+                  onClick={() => { setCategory(category === c ? "" : c); setHi(0); testBox.current?.focus(); }}
+                  className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                    category === c ? "bg-blue-600 text-white" : isDark ? "bg-slate-800 text-slate-300 hover:bg-slate-700" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!testQ.trim() && !category && quickTests.length > 0 && (
+            <div className="hidden shrink-0 grid-cols-3 gap-1.5 xl:grid">
+              {quickTests.map((t) => {
+                const added = inCart.has(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    tabIndex={-1}
+                    onClick={() => { toggleTest(t); testBox.current?.focus(); }}
+                    style={{ backgroundColor: added ? "var(--pos-row-added)" : undefined }}
+                    className={`pos-surface-alt flex items-center justify-between gap-1.5 rounded-lg border px-2 py-1 text-left transition ${
+                      added ? "border-emerald-500" : "hover:border-blue-500"
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-1 truncate text-[11.5px] font-semibold">
+                        <Zap size={10} className="shrink-0 text-blue-500" />
+                        <span className="truncate">{t.name}</span>
+                      </p>
+                      <p className="truncate font-mono text-[10px]" style={{ color: "var(--pos-muted)" }}>
+                        {t.code} · {t.sampleType}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[11px] font-bold tabular-nums text-emerald-500">
+                      {formatMoney(t.price)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="pos-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border">
+            {!ready ? (
+              <p className="p-4 text-center text-xs" style={{ color: "var(--pos-muted)" }}>Select a branch first.</p>
+            ) : loadingTests && tests.length === 0 ? (
+              <div className="p-4"><Spinner /></div>
+            ) : matches.length === 0 ? (
+              <p className="p-4 text-center text-xs" style={{ color: "var(--pos-muted)" }}>No tests found.</p>
+            ) : (
+              <>
+                <div
+                  className="pos-surface-alt grid shrink-0 grid-cols-[5rem_1fr_6rem_5.25rem_2.25rem] border-b px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: "var(--pos-muted)" }}
+                >
+                  <span>Code</span>
+                  <span>Test / Panel</span>
+                  <span>Sample</span>
+                  <span className="text-right">Fee</span>
+                  <span className="text-right">Add</span>
+                </div>
+                <VirtualRows
+                  items={matches}
+                  rowHeight={40}
+                  scrollToIndex={safeHi}
+                  renderRow={(t, idx) => {
+                    const added = inCart.has(t.id);
+                    const active = idx === safeHi;
+                    return (
+                      <div
+                        role="button"
+                        tabIndex={-1}
+                        data-test-idx={idx}
+                        onMouseEnter={() => setHi(idx)}
+                        onClick={() => { toggleTest(t); testBox.current?.focus(); }}
+                        title={added ? "Click to unselect" : "Click to select"}
+                        style={{
+                          borderColor: "var(--pos-border)",
+                          backgroundColor: active ? "var(--pos-row-active)" : added ? "var(--pos-row-added)" : undefined,
+                        }}
+                        className={`grid h-10 grid-cols-[5rem_1fr_6rem_5.25rem_2.25rem] cursor-pointer items-center border-b px-2.5 text-[12.5px] transition-colors ${
+                          active ? "ring-2 ring-inset ring-blue-500" : "hover:bg-blue-500/5"
+                        }`}
+                      >
+                        <span className="truncate font-mono text-[11px]" style={{ color: "var(--pos-muted)" }}>{t.code}</span>
+                        <span className="truncate pr-2 font-semibold">{t.name}</span>
+                        <span className="truncate text-[11px]" style={{ color: "var(--pos-muted)" }}>{t.sampleType || "Blood"}</span>
+                        <span className="text-right font-bold tabular-nums">{formatMoney(t.price)}</span>
+                        <span className="text-right">
+                          {added ? <Check size={14} className="inline text-emerald-500" /> : <Plus size={14} className="inline text-blue-500" />}
+                        </span>
+                      </div>
+                    );
                   }}
                 />
-              </div>
-              {categories.length > 0 && (
-                <div className="mt-1 flex max-h-14 flex-wrap gap-1 overflow-y-auto">
-                  <button type="button" onClick={() => { setCategory(""); setHi(0); }} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${!category ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>All</button>
-                  {categories.map((c) => (
-                    <button key={c} type="button" onClick={() => { setCategory(category === c ? "" : c); setHi(0); }} className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${category === c ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{c}</button>
-                  ))}
-                </div>
-              )}
-              <div ref={testListRef} className="mt-1.5 max-h-[calc(100vh-250px)] min-h-[260px] overflow-y-auto rounded-md border border-slate-200">
-                {!ready ? <p className="p-4 text-center text-xs text-slate-400">Select a branch first.</p>
-                  : loadingTests ? <div className="p-4"><Spinner /></div>
-                  : matches.length === 0 ? <p className="p-4 text-center text-xs text-slate-400">No tests found.</p>
-                  : (
-                    <table className="w-full text-[13px]">
-                      <tbody className="divide-y divide-slate-100">
-                        {matches.map((t, idx) => {
-                          const added = inCart.has(t.id);
-                          const active = idx === safeHi;
-                          return (
-                            <tr
-                              key={t.id}
-                              data-test-idx={idx}
-                              onMouseEnter={() => setHi(idx)}
-                              onClick={() => { toggleTest(t); testBox.current?.focus(); }}
-                              title={added ? "Click to unselect" : "Click to select"}
-                              className={`cursor-pointer transition-colors ${active ? (added ? "bg-emerald-100 ring-2 ring-inset ring-blue-500" : "bg-blue-100 ring-2 ring-inset ring-blue-500") : added ? "bg-emerald-50 hover:bg-rose-50" : "hover:bg-blue-50"}`}
-                            >
-                              <td className="w-16 px-2 py-1 font-mono text-[11px] text-slate-500">{t.code}</td>
-                              <td className="px-2 py-1 font-medium text-slate-800">{t.name}</td>
-                              <td className="w-20 px-2 py-1 text-right font-semibold text-slate-700">{formatMoney(t.price)}</td>
-                              <td className="w-7 px-1 text-center">{added ? <Check size={14} className="inline text-emerald-600" /> : <Plus size={14} className="inline text-blue-600" />}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  )}
-              </div>
-              <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-slate-400">
-                <span><kbd className="rounded bg-slate-100 px-1 font-mono text-slate-600">↑/↓</kbd> Navigate</span>
-                <span><kbd className="rounded bg-slate-100 px-1 font-mono text-slate-600">Enter</kbd> Add</span>
-                <span><kbd className="rounded bg-slate-100 px-1 font-mono text-slate-600">F2</kbd> Search</span>
-                <span><kbd className="rounded bg-slate-100 px-1 font-mono text-slate-600">F8</kbd> Save</span>
-                <span><kbd className="rounded bg-slate-100 px-1 font-mono text-slate-600">F9</kbd> Save &amp; Print</span>
-              </p>
-            </section>
-
-            <section className="min-w-0 rounded-lg border border-slate-200 bg-white">
-              <div className="flex items-center justify-between border-b border-slate-100 px-2.5 py-1.5">
-                <h2 className="text-xs font-bold uppercase tracking-wide text-slate-600">Selected tests ({cart.length})</h2>
-                {cart.length > 0 && <button type="button" onClick={() => setCart([])} className="text-[11px] font-semibold text-rose-600 hover:underline">Unselect all</button>}
-              </div>
-              <div className="max-h-[calc(100vh-190px)] min-h-[300px] overflow-y-auto">
-                {cart.length === 0 ? <p className="p-4 text-center text-xs text-slate-400">No tests selected.</p> : (
-                  <table className="w-full text-[13px]">
-                    <tbody className="divide-y divide-slate-100">
-                      {cart.map((t, i) => (
-                        <tr key={t.id}>
-                          <td className="w-7 px-2 py-1 text-[11px] text-slate-400">{i + 1}</td>
-                          <td className="px-2 py-1"><span className="font-medium text-slate-800">{t.name}</span> <span className="text-[11px] text-slate-400">{t.code}</span></td>
-                          <td className="w-20 px-2 py-1 text-right font-semibold text-slate-700">{formatMoney(t.price)}</td>
-                          <td className="w-8 px-1 text-center"><button type="button" onClick={() => removeTest(t.id)} aria-label={`Unselect ${t.name}`} title="Unselect" className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600"><X size={14} /></button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </section>
+              </>
+            )}
           </div>
-        </div>
+        </section>
 
-        {/* ---------------- right: bill ---------------- */}
-        <aside className="lg:sticky lg:top-0 lg:self-start">
-          <section className="space-y-2 rounded-lg border border-slate-200 bg-white p-2.5">
-            <h2 className="text-xs font-bold uppercase tracking-wide text-slate-600">Bill</h2>
-            <div className="space-y-0.5 text-[13px]">
-              <Row l="Subtotal" v={formatMoney(subtotal)} />
-              <Row l="Discount" v={`- ${formatMoney(discRs)}`} />
-              <div className="mt-1 border-t border-slate-200 pt-1"><Row l="Total" v={formatMoney(total)} big /></div>
+        {/* Right Zone: Cart + Totals + Payment Chips + Actions */}
+        <aside className="flex min-h-0 min-w-0 flex-col gap-1.5 overflow-hidden">
+          <CartPanel
+            title="Selected Tests"
+            count={cart.length}
+            canUndo={undoStack.length > 0}
+            onUndo={handleUndo}
+            onClear={reset}
+            dark={isDark}
+          >
+            {cart.length === 0 ? (
+              <div className="flex h-full min-h-[120px] flex-col items-center justify-center p-4 text-center text-xs" style={{ color: "var(--pos-muted)" }}>
+                <p className="font-semibold" style={{ color: "var(--pos-text)" }}>No tests selected</p>
+                <p className="mt-1">Search tests on the left and press <kbd className="rounded border px-1 font-mono text-[10px]">Enter</kbd></p>
+              </div>
+            ) : (
+              <table className="w-full text-left text-[12px]">
+                <thead
+                  className="pos-surface-alt sticky top-0 z-10 border-b text-[10px] font-bold uppercase"
+                  style={{ color: "var(--pos-muted)" }}
+                >
+                  <tr>
+                    <th className="w-6 px-2 py-1.5">#</th>
+                    <th className="px-2 py-1.5">Test</th>
+                    <th className="w-20 px-2 py-1.5 text-right">Fee</th>
+                    <th className="w-7 px-1 py-1.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y" style={{ borderColor: "var(--pos-border)" }}>
+                  {cart.map((t, i) => (
+                    <tr
+                      key={t.id}
+                      onClick={() => setCartIdx(i)}
+                      style={{
+                        borderColor: "var(--pos-border)",
+                        backgroundColor: i === cartIdx ? "var(--pos-row-active)" : undefined,
+                      }}
+                    >
+                      <td className="px-2 py-1.5 text-[10.5px]" style={{ color: "var(--pos-muted)" }}>{i + 1}</td>
+                      <td className="px-2 py-1.5">
+                        <p className="font-semibold leading-tight">{t.name}</p>
+                        <p className="font-mono text-[10px]" style={{ color: "var(--pos-muted)" }}>{t.code} · {t.sampleType}</p>
+                      </td>
+                      <td className="px-2 py-1.5 text-right font-bold tabular-nums">{formatMoney(t.price)}</td>
+                      <td className="px-1 py-1.5 text-center">
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onClick={() => removeTest(t.id)}
+                          aria-label={`Remove ${t.name}`}
+                          className="rounded p-1 text-rose-500 hover:bg-rose-500/10"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </CartPanel>
+
+          <section className="pos-surface flex shrink-0 flex-col gap-2 rounded-lg border p-2.5 shadow-sm">
+            <TotalsCard
+              subtotal={subtotal}
+              discRs={discRs}
+              total={total}
+              discType={discType}
+              discValue={discValue}
+              onDiscTypeChange={setDiscType}
+              onDiscValueChange={setDiscValue}
+              discountRef={discountRef}
+              payTouched={payTouched}
+              payAmount={payAmount}
+              onPayAmountChange={(v) => { setPayTouched(true); setPayAmount(v); }}
+              onPayFull={() => { setPayTouched(false); setPayAmount(""); }}
+              onPayZero={() => { setPayTouched(true); setPayAmount("0"); }}
+              balance={balance}
+              change={change}
+              onEnterComplete={() => save(true)}
+              ready={ready}
+              dark={isDark}
+              canDiscount={limits.canDiscount}
+              maxDiscountPct={limits.maxDiscountPct}
+            />
+
+            <PaymentChips
+              methods={allowedMethods}
+              value={method}
+              onChange={setMethod}
+              disabled={!ready}
+              dark={isDark}
+            />
+
+            {method !== "CASH" && (
+              <input
+                className="pos-input h-7 w-full rounded border px-2 text-xs outline-none focus:border-blue-500"
+                value={reference}
+                maxLength={100}
+                disabled={!ready}
+                placeholder="Transaction / Slip Reference #"
+                onChange={(e) => setReference(e.target.value)}
+              />
+            )}
+
+            {error && (
+              <p className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-500">
+                {error}
+              </p>
+            )}
+
+            <div className="grid grid-cols-[1fr_1fr_auto] gap-1.5">
+              <button
+                type="button"
+                disabled={saving || !ready}
+                onClick={() => save(true)}
+                className="flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
+              >
+                <Printer size={14} /> {saving ? "Saving..." : "Save & Print [F9]"}
+              </button>
+              <button
+                type="button"
+                disabled={saving || !ready}
+                onClick={() => save(false)}
+                className="h-9 rounded-lg bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+              >
+                Save Only [F10]
+              </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={reset}
+                title="New Order (F2)"
+                aria-label="New Order (F2)"
+                className="pos-surface-alt flex h-9 w-9 items-center justify-center rounded-lg border transition hover:opacity-80"
+              >
+                <RotateCcw size={14} />
+              </button>
             </div>
-
-            <div className="grid grid-cols-[1fr_74px] gap-2">
-              <L label="Discount"><input className={ic} type="number" min="0" step="any" value={discValue} onChange={(e) => setDiscValue(e.target.value)} /></L>
-              <L label="Type"><select className={ic} value={discType} onChange={(e) => setDiscType(e.target.value)}><option value="RS">Rs</option><option value="PCT">%</option></select></L>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <L label="Received (Rs)"><input className={ic} type="number" min="0" step="any" value={payTouched ? payAmount : String(total || "")} onChange={(e) => { setPayTouched(true); setPayAmount(e.target.value); }} /></L>
-              <L label="Method"><select className={ic} value={method} onChange={(e) => setMethod(e.target.value)}>{METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></L>
-            </div>
-            <div className="flex gap-1">
-              <button type="button" onClick={() => { setPayTouched(false); setPayAmount(""); }} className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Full</button>
-              <button type="button" onClick={() => { setPayTouched(true); setPayAmount("0"); }} className="rounded border border-slate-300 px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Pay later</button>
-            </div>
-            {method !== "CASH" && <L label="Reference"><input className={ic} value={reference} maxLength={100} placeholder="Transaction / slip no." onChange={(e) => setReference(e.target.value)} /></L>}
-
-            <div className="rounded-md bg-slate-50 px-2.5 py-1.5 text-[13px]">
-              <Row l="Balance due" v={formatMoney(balance)} danger={balance > 0} />
-              {change > 0 && <Row l="Change to return" v={formatMoney(change)} />}
-            </div>
-
-            <L label="Notes"><textarea className={`${ic} h-12 py-1`} value={notes} maxLength={500} onChange={(e) => setNotes(e.target.value)} /></L>
-
-            {error && <p className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700">{error}</p>}
-
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" disabled={saving || !ready} onClick={() => save(false)} className="h-9 rounded-md bg-blue-600 text-[13px] font-bold text-white hover:bg-blue-700 disabled:opacity-50">{saving ? "Saving..." : "Save (F8)"}</button>
-              <button type="button" disabled={saving || !ready} onClick={() => save(true)} className="flex h-9 items-center justify-center gap-1 rounded-md bg-emerald-600 text-[13px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"><Printer size={14} /> Print (F9)</button>
-            </div>
-            <button type="button" disabled={saving} onClick={reset} className="flex w-full items-center justify-center gap-1 rounded-md border border-slate-300 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50"><RotateCcw size={12} /> Clear form</button>
           </section>
         </aside>
       </div>
+
+      <ShortcutBar
+        dark={isDark}
+        onTrigger={(k) => {
+          if (k === "F1") window.dispatchEvent(new Event("labos:help"));
+          else if (k === "F2") reset();
+          else if (k === "F3") { testBox.current?.focus(); testBox.current?.select?.(); }
+          else if (k === "F5") setHoldModalOpen(true);
+          else if (k === "F6") discountRef.current?.focus();
+          else if (k === "F8") {
+            const idx = allowedMethodValues.indexOf(method);
+            setMethod(allowedMethodValues[(idx + 1) % allowedMethodValues.length]);
+          } else if (k === "F9") save(true);
+          else if (k === "F10") save(false);
+          else if (k === "Ctrl+Z") handleUndo();
+        }}
+      />
+
+      <HeldBillsModal
+        open={holdModalOpen}
+        bills={heldBills}
+        onClose={() => { setHoldModalOpen(false); testBox.current?.focus(); }}
+        onHoldCurrent={handleHoldCurrent}
+        canHoldCurrent={cart.length > 0}
+        onResume={handleResumeBill}
+        onDelete={(id) => setHeldBills(removeHeldBill("lab", branchId, id))}
+      />
+
+      {pinModal && (
+        <PinOverrideModal
+          open={Boolean(pinModal)}
+          message={`Discount exceeds your role limit (${limits.maxDiscountPct}%). Enter Manager / Admin PIN to approve.`}
+          onClose={() => { setPinModal(null); testBox.current?.focus(); }}
+          onConfirm={(pin) => {
+            const p = pinModal.print;
+            setPinModal(null);
+            save(p, pin);
+          }}
+        />
+      )}
     </div>
   );
 }
-
-const Row = ({ l, v, big, danger }) => (
-  <div className={`flex justify-between py-0.5 ${big ? "text-base font-extrabold text-slate-900" : danger ? "font-bold text-rose-600" : "text-slate-600"}`}>
-    <span>{l}</span><span>{v}</span>
-  </div>
-);

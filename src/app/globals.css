@@ -31,8 +31,8 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 img, svg, video, canvas { max-width: 100%; }
 
 ::selection { background: #dbeafe; color: #1e3a8a; }
-:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
-input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #3b82f6; outline-offset: 0; }
+:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #2563eb; outline-offset: 0; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16); }
 input:focus, textarea:focus { background-color: #fff; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -77,3 +77,67 @@ input[type="number"]::-webkit-inner-spin-button { opacity: 0.4; }
   animation: labos-shimmer 1.4s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* ---- POS Theme Tokens (Light & Dark) ---- */
+.pos-theme {
+  --pos-bg: #f1f5f9;
+  --pos-panel: #ffffff;
+  --pos-panel-alt: #f8fafc;
+  --pos-border: #e2e8f0;
+  --pos-text: #0f172a;
+  --pos-muted: #64748b;
+  --pos-input-bg: #ffffff;
+  --pos-input-border: #cbd5e1;
+  --pos-row-hover: #eff6ff;
+  --pos-row-active: #dbeafe;
+  --pos-row-added: #ecfdf5;
+  --pos-chip-bg: #f1f5f9;
+  --pos-chip-text: #475569;
+  background-color: var(--pos-bg);
+  color: var(--pos-text);
+}
+
+.pos-theme[data-pos-theme="dark"] {
+  color-scheme: dark;
+  --pos-bg: #090d16;
+  --pos-panel: #111827;
+  --pos-panel-alt: #172033;
+  --pos-border: #243044;
+  --pos-text: #f1f5f9;
+  --pos-muted: #94a3b8;
+  --pos-input-bg: #0f172a;
+  --pos-input-border: #334155;
+  --pos-row-hover: rgba(37, 99, 235, 0.14);
+  --pos-row-active: rgba(37, 99, 235, 0.28);
+  --pos-row-added: rgba(16, 185, 129, 0.14);
+  --pos-chip-bg: #1e293b;
+  --pos-chip-text: #cbd5e1;
+}
+
+.pos-theme input:focus,
+.pos-theme textarea:focus,
+.pos-theme select:focus {
+  background-color: var(--pos-input-bg);
+}
+
+.pos-surface {
+  background-color: var(--pos-panel);
+  border-color: var(--pos-border);
+  color: var(--pos-text);
+}
+
+.pos-surface-alt {
+  background-color: var(--pos-panel-alt);
+  border-color: var(--pos-border);
+  color: var(--pos-text);
+}
+
+.pos-input {
+  background-color: var(--pos-input-bg);
+  border-color: var(--pos-input-border);
+  color: var(--pos-text);
+}
+
+.pos-input::placeholder {
+  color: var(--pos-muted);
+}

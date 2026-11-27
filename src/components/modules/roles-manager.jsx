@@ -4,7 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Eye, Lock, Pencil, Plus, Trash2 } from "lucide-react";
 import { api } from "@/lib/client";
-import { MODULES } from "@/lib/permissions";
+import { EXTRA_PERMISSIONS, MODULES } from "@/lib/permissions";
+import { PHARMACY_PAYMENT_METHODS } from "@/lib/pharmacy";
 import { RoleViewModal } from "@/components/modules/role-detail";
 import { Badge, Button, EmptyState, ErrorState, Field, FormError, Modal, PageHeader, Spinner, inputClass, useConfirm, useToast } from "@/components/ui";
 
@@ -33,7 +34,12 @@ export default function RolesManager() {
   const router = useRouter();
   const pathname = usePathname();
   useEffect(() => { // sidebar "Add New Role" opens the create form
-    if (sp.get("new") === "1") { setEditing({}); router.replace(pathname, { scroll: false }); }
+    if (sp.get("new") !== "1") return;
+    const t = setTimeout(() => {
+      setEditing({});
+      router.replace(pathname, { scroll: false });
+    }, 0);
+    return () => clearTimeout(t);
   }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(() => {
@@ -95,6 +101,10 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
   const [name, setName] = useState(role.name || "");
   const [description, setDescription] = useState(role.description || "");
   const [perms, setPerms] = useState(new Set(role.permissions || []));
+  const [maxDiscountPct, setMaxDiscountPct] = useState(String(role.maxDiscountPct ?? 100));
+  const [canEditPrice, setCanEditPrice] = useState(role.canEditPrice !== false);
+  const [requireShift, setRequireShift] = useState(Boolean(role.requireShift));
+  const [allowedMethods, setAllowedMethods] = useState(new Set(role.allowedMethods || []));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   // ---- who is the role for? (Super: organization + branch, Org admin: branch, Branch admin: fixed) ----
@@ -115,20 +125,30 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
     (b) => b.status === "ACTIVE" && (!isSuper || (orgId && orgId !== "ALL" && b.organizationId === orgId)),
   );
   const toggle = (k) => setPerms((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleMethod = (m) => setAllowedMethods((s) => { const n = new Set(s); n.has(m) ? n.delete(m) : n.add(m); return n; });
 
   async function submit(e) {
     e.preventDefault();
     if (saving) return;
     setSaving(true); setError("");
     try {
+      const common = {
+        name,
+        description,
+        permissions: [...perms],
+        maxDiscountPct: Math.min(100, Math.max(0, Number(maxDiscountPct) || 0)),
+        canEditPrice,
+        requireShift,
+        allowedMethods: [...allowedMethods],
+      };
       await api(isNew ? "/api/roles" : `/api/roles/${role.id}`, { method: isNew ? "POST" : "PATCH", body: isNew
-          ? { name, description, permissions: [...perms], ...(isSuper ? (orgId === "ALL" ? { applyToAll: true } : { organizationId: orgId }) : {}), ...(opts?.locked ? {} : { branchId: orgId === "ALL" ? null : branchId || null }) }
-          : { name, description, permissions: [...perms] } });
+          ? { ...common, ...(isSuper ? (orgId === "ALL" ? { applyToAll: true } : { organizationId: orgId }) : {}), ...(opts?.locked ? {} : { branchId: orgId === "ALL" ? null : branchId || null }) }
+          : common });
       toast.success(isNew ? "Role created." : "Role updated.");
       onSaved();
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
-  const groups = [...new Set(catalog.map((p) => p.key.split(".")[0]))];
+  const moduleGroups = MODULES.map(([k]) => k).filter((g) => catalog.some((p) => p.key.startsWith(`${g}.`)));
   return (
     <Modal open size="md" title={isNew ? "New role" : `Edit ${role.name}`} onClose={saving ? undefined : onClose}
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="role-form" loading={saving}>Save role</Button></>}>
@@ -163,13 +183,48 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
             )}
           </div>
         )}
+        <div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-3">
+          <Field label="Max POS Discount (%)">
+            <input type="number" min="0" max="100" step="1" value={maxDiscountPct} onChange={(e) => setMaxDiscountPct(e.target.value)} className={inputClass} />
+          </Field>
+          <label className="flex items-center gap-2 pt-4 text-xs font-medium text-slate-700">
+            <input type="checkbox" checked={canEditPrice} onChange={(e) => setCanEditPrice(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+            Can edit prices
+          </label>
+          <label className="flex items-center gap-2 pt-4 text-xs font-medium text-slate-700">
+            <input type="checkbox" checked={requireShift} onChange={(e) => setRequireShift(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+            Require cashier shift
+          </label>
+          <div className="sm:col-span-3">
+            <p className="mb-1 text-[11px] font-semibold text-slate-600">Allowed Payment Methods (none selected = all allowed)</p>
+            <div className="flex flex-wrap gap-2">
+              {PHARMACY_PAYMENT_METHODS.map(([v, label]) => (
+                <label key={v} className="inline-flex items-center gap-1 rounded border border-slate-200 bg-white px-2 py-0.5 text-xs">
+                  <input type="checkbox" checked={allowedMethods.has(v)} onChange={() => toggleMethod(v)} className="h-3.5 w-3.5" />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
         <div className="overflow-hidden rounded-xl border border-slate-200">
           <table className="w-full text-sm"><thead className="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-3 py-2 text-left">Module</th><th className="px-3 py-2">View</th><th className="px-3 py-2">Manage</th></tr></thead>
-            <tbody className="divide-y divide-slate-100">{groups.map((g) => {
+            <tbody className="divide-y divide-slate-100">{moduleGroups.map((g) => {
               const view = catalog.find((p) => p.key === `${g}.view`); const manage = catalog.find((p) => p.key === `${g}.manage`);
-              return <tr key={g}><td className="px-3 py-2 font-medium capitalize text-slate-700">{g}</td>
-                {[view, manage].map((p, i) => <td key={i} className="px-3 py-2 text-center">{p && <input type="checkbox" aria-label={p.name} checked={perms.has(p.key)} onChange={() => toggle(p.key)} className="h-4 w-4 rounded border-slate-300" />}</td>)}</tr>;
+              return <tr key={g}><td className="px-3 py-1.5 font-medium capitalize text-slate-700">{g.replace(/_/g, " ")}</td>
+                {[view, manage].map((p, i) => <td key={i} className="px-3 py-1.5 text-center">{p && <input type="checkbox" aria-label={p.name} checked={perms.has(p.key)} onChange={() => toggle(p.key)} className="h-4 w-4 rounded border-slate-300" />}</td>)}</tr>;
             })}</tbody></table>
+        </div>
+        <div className="rounded-xl border border-slate-200 p-3">
+          <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Granular POS &amp; Cost Controls</p>
+          <div className="grid gap-1.5 sm:grid-cols-2">
+            {EXTRA_PERMISSIONS.map((p) => (
+              <label key={p.key} className="flex items-start gap-2 rounded border border-slate-100 px-2.5 py-1.5 text-xs hover:bg-slate-50">
+                <input type="checkbox" checked={perms.has(p.key)} onChange={() => toggle(p.key)} className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300" />
+                <span><b className="block text-slate-800">{p.name}</b><span className="text-[11px] text-slate-400">{p.description}</span></span>
+              </label>
+            ))}
+          </div>
         </div>
       </form>
     </Modal>

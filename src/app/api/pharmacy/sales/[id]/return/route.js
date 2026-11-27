@@ -1,14 +1,16 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { apiContext, authorityWhere } from "@/lib/scope";
+import { apiContext, authorityWhere, hasPermission, verifyManagerOverride } from "@/lib/scope";
 import { fail, handleError, isUuid, json, money, opt, parseBody, positive, round2, uuid } from "@/lib/http";
 import { nextNumber } from "@/lib/sequence";
 import { PHARMACY_METHOD_VALUES, recordStockMovement } from "@/lib/pharmacy";
+import { clientIp, logAudit } from "@/lib/audit";
 
 const schema = z.object({
   reason: opt(300),
   refundMethod: z.enum(PHARMACY_METHOD_VALUES).default("CASH"),
   refundAmount: money.optional(),
+  overridePin: z.string().trim().max(10).optional(),
   items: z
     .array(z.object({ saleItemId: uuid, quantity: positive }))
     .min(1, "Select at least one medicine to return."),
@@ -23,12 +25,25 @@ export async function POST(request, { params }) {
     const parsed = await parseBody(request, schema);
     if (parsed.error) return parsed.error;
 
+    const actor = auth.ctx.actor;
     const result = await prisma.$transaction(async (tx) => {
       const found = await tx.pharmacySale.findFirst({
-        where: { id, ...authorityWhere(auth.ctx.actor) },
-        select: { id: true },
+        where: { id, ...authorityWhere(actor) },
+        select: { id: true, organizationId: true, branchId: true },
       });
       if (!found) return { error: fail("Sale not found.", 404) };
+      let overrideApprover = null;
+      if (actor.role === "STAFF" && !hasPermission(actor.permissions, "pos.refund")) {
+        overrideApprover = await verifyManagerOverride(tx, {
+          organizationId: found.organizationId,
+          branchId: found.branchId,
+          pin: parsed.data.overridePin,
+          requiredPerm: "pos.refund",
+        });
+        if (!overrideApprover) {
+          return { error: fail("Processing refunds requires pos.refund permission or Manager PIN.", 403) };
+        }
+      }
       await tx.$queryRaw`SELECT id FROM "PharmacySale" WHERE id = ${id}::uuid FOR UPDATE`;
 
       const sale = await tx.pharmacySale.findUnique({ where: { id }, include: { items: true } });
@@ -129,6 +144,19 @@ export async function POST(request, { params }) {
           status: allReturned ? "RETURNED" : "PARTIAL_RETURN",
           refundedAmount: round2(Number(sale.refundedAmount) + refundAmount),
         },
+      });
+      await logAudit({
+        tx,
+        organizationId: sale.organizationId,
+        branchId: sale.branchId,
+        userId: actor.id,
+        actorName: actor.name,
+        actorRole: actor.role,
+        action: "SALE_RETURN",
+        resource: "PHARMACY_SALE_RETURN",
+        resourceId: ret.id,
+        summary: `Return ${returnNo} on ${sale.saleNo} · Rs. ${refundAmount}${overrideApprover ? ` (PIN: ${overrideApprover.name})` : ""}`,
+        ip: clientIp(request),
       });
 
       return { ret };

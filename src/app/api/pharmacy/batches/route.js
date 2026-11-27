@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { apiContext, scopeWhere } from "@/lib/scope";
+import { canViewCosts, stripCostFields } from "@/lib/permissions";
 import { fail, handleError, isUuid, json, money, opt, optUuid, paging, parseBody, req, round2, uuid } from "@/lib/http";
 import { recordStockMovement } from "@/lib/pharmacy";
 
@@ -40,7 +41,8 @@ export async function GET(request) {
       }),
       prisma.medicineBatch.count({ where }),
     ]);
-    return json({ items, total, page, pageSize });
+    const hideCost = !canViewCosts(auth.ctx.actor);
+    return json({ items: hideCost ? items.map(stripCostFields) : items, total, page, pageSize });
   } catch (error) {
     return handleError(error, "Batches list");
   }

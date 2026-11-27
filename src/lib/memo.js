@@ -59,3 +59,12 @@ export function memoDelete(prefix) {
     }
   }
 }
+
+export function memoClear() {
+  store.clear();
+}
+
+export function invalidateStatsCache() {
+  memoDelete("stats:");
+  memoDelete("pharmacy:");
+}

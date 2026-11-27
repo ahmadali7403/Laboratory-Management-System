@@ -39,6 +39,7 @@ export default function PharmacyPayment({
   error,
   saving,
   ready,
+  discountRef,
   onComplete,
   onReset,
 }) {
@@ -47,7 +48,7 @@ export default function PharmacyPayment({
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <h2 className="text-xs font-bold uppercase tracking-wide text-slate-600">Billing &amp; Payment</h2>
-          <span className="text-[10px] font-semibold text-slate-400">Ctrl+Enter to complete</span>
+          <span className="text-[10px] font-semibold text-slate-400">F9 Print · F10 Save</span>
         </div>
 
         <div className="rounded-md bg-slate-50 px-2.5 py-1.5 text-[12.5px]">
@@ -61,8 +62,9 @@ export default function PharmacyPayment({
 
         <div className="grid grid-cols-[1fr_72px] gap-2">
           <label className="block">
-            <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wide text-slate-500">Bill Discount</span>
+            <span className="mb-0.5 block text-[10px] font-bold uppercase tracking-wide text-slate-500">Bill Discount (F6)</span>
             <input
+              ref={discountRef}
               className={ic}
               type="number"
               min="0"
@@ -70,6 +72,7 @@ export default function PharmacyPayment({
               value={discValue}
               disabled={!ready}
               onChange={(e) => onDiscValueChange(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onComplete?.(true); } }}
               placeholder="0"
             />
           </label>
@@ -165,7 +168,7 @@ export default function PharmacyPayment({
             onClick={() => onComplete(false)}
             className="h-9 rounded-md bg-blue-600 px-2 text-[12.5px] font-bold text-white hover:bg-blue-700 disabled:opacity-50"
           >
-            {saving ? "Saving..." : "Complete (Ctrl+↵)"}
+            {saving ? "Saving..." : "Save Only (F10)"}
           </button>
           <button
             type="button"
@@ -173,7 +176,7 @@ export default function PharmacyPayment({
             onClick={() => onComplete(true)}
             className="flex h-9 items-center justify-center gap-1 rounded-md bg-emerald-600 px-2 text-[12.5px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
           >
-            <Printer size={14} /> Print (F9)
+            <Printer size={14} /> Save &amp; Print (F9)
           </button>
         </div>
 

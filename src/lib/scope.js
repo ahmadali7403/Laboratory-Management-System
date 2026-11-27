@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -5,7 +6,9 @@ import { getAdminSession, getUserSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { fail, isUuid } from "@/lib/http";
 import { memo } from "@/lib/memo";
-import { hasModule, staffMayCall } from "@/lib/permissions";
+import { canViewCosts, hasModule, hasPermission, staffMayCall } from "@/lib/permissions";
+
+export { canViewCosts, hasPermission };
 
 /**
  * TENANT SCOPE ENGINE
@@ -36,15 +39,66 @@ export function homeFor(role) {
   return "/login";
 }
 
-/** Permission keys of every role assigned to the user (read from the database, cached for a few seconds). */
-export async function loadStaffPermissions(userId) {
+/** Permission keys & POS limits across all roles assigned to the user. */
+export async function loadStaffAccess(userId) {
   return memo(`perms:${userId}`, 8_000, async () => {
-    const rows = await prisma.rolePermission.findMany({
-      where: { role: { userRoles: { some: { userId } }, name: { notIn: ADMIN_ROLE_NAMES } } },
-      select: { permission: { select: { key: true } } },
+    const roles = await prisma.role.findMany({
+      where: { userRoles: { some: { userId } }, name: { notIn: ADMIN_ROLE_NAMES } },
+      select: {
+        name: true,
+        maxDiscountPct: true,
+        canEditPrice: true,
+        allowedMethods: true,
+        requireShift: true,
+        permissions: { select: { permission: { select: { key: true } } } },
+      },
     });
-    return [...new Set(rows.map((r) => r.permission.key))];
+    const permissions = [...new Set(roles.flatMap((r) => r.permissions.map((p) => p.permission.key)))];
+    const maxDiscountPct = roles.length
+      ? Math.max(...roles.map((r) => (r.maxDiscountPct != null ? Number(r.maxDiscountPct) : 100)))
+      : 100;
+    const canEditPrice = roles.some((r) => r.canEditPrice !== false);
+    const requireShift = roles.some((r) => Boolean(r.requireShift));
+    const methodUnion = [...new Set(roles.flatMap((r) => r.allowedMethods || []))];
+    return {
+      permissions,
+      roleNames: roles.map((r) => r.name),
+      maxDiscountPct,
+      canEditPrice,
+      requireShift,
+      allowedMethods: roles.some((r) => !r.allowedMethods?.length) ? [] : methodUnion,
+    };
   });
+}
+
+export async function loadStaffPermissions(userId) {
+  const acc = await loadStaffAccess(userId);
+  return acc.permissions;
+}
+
+export async function verifyManagerOverride(db, { organizationId, branchId, pin, requiredPerm = "pos.discount_override" }) {
+  const cleanPin = String(pin || "").trim();
+  if (!/^\d{4,6}$/.test(cleanPin)) return null;
+  const candidates = await db.user.findMany({
+    where: {
+      organizationId,
+      status: "ACTIVE",
+      pinHash: { not: null },
+      ...(branchId ? { memberships: { some: { branchId } } } : {}),
+      OR: [
+        { userRoles: { some: { role: { name: { in: ADMIN_ROLE_NAMES } } } } },
+        { userRoles: { some: { role: { permissions: { some: { permission: { key: requiredPerm } } } } } } },
+      ],
+    },
+    select: { id: true, name: true, pinHash: true },
+    take: 25,
+  });
+  for (const c of candidates) {
+    if (c.pinHash && (await bcrypt.compare(cleanPin, c.pinHash))) {
+      return { id: c.id, name: c.name };
+    }
+  }
+  return null;
 }
 
 export async function getActor() {
@@ -55,6 +109,7 @@ export async function getActor() {
       id: admin.id,
       name: admin.name,
       email: admin.email,
+      mustChangePassword: Boolean(admin.mustChangePassword),
       organizationId: null,
       branchId: null,
     };
@@ -66,6 +121,7 @@ export async function getActor() {
       id: user.id,
       name: user.name,
       username: user.username,
+      mustChangePassword: Boolean(user.mustChangePassword),
       organizationId: user.organizationId,
       branchId: null,
     };
@@ -76,19 +132,23 @@ export async function getActor() {
       id: user.id,
       name: user.name,
       username: user.username,
+      mustChangePassword: Boolean(user.mustChangePassword),
       organizationId: user.organizationId,
       branchId: user.branchId,
     };
   }
   if (user && user.role === "STAFF" && user.branchId) {
+    const access = await loadStaffAccess(user.id);
     return {
       role: "STAFF",
       id: user.id,
       name: user.name,
       username: user.username,
+      mustChangePassword: Boolean(user.mustChangePassword),
       organizationId: user.organizationId,
       branchId: user.branchId,
-      permissions: await loadStaffPermissions(user.id),
+      permissions: access.permissions,
+      roleMeta: access,
     };
   }
   return null;
@@ -417,12 +477,35 @@ async function loadScopeOptions({ actor, scope }) {
 
 /** The only scope information that is ever sent to client components. */
 export function publicScope({ actor, scope }, options) {
+  const meta = actor.roleMeta || { maxDiscountPct: 100, canEditPrice: true, allowedMethods: [], requireShift: false };
   return {
-    // Staff are branch-locked exactly like a branch admin, so the screens treat them the same way.
-    // Real access is enforced on the server by their role permissions.
     role: actor.role === "STAFF" ? "BRANCH_ADMIN" : actor.role,
     isStaff: actor.role === "STAFF",
+    userId: actor.id,
+    userName: actor.name,
+    mustChangePassword: Boolean(actor.mustChangePassword),
     permissions: actor.role === "STAFF" ? actor.permissions : null,
+    roleLimits: actor.role === "STAFF"
+      ? {
+          maxDiscountPct: meta.maxDiscountPct,
+          canEditPrice: meta.canEditPrice,
+          allowedMethods: meta.allowedMethods,
+          requireShift: meta.requireShift,
+          canViewCosts: canViewCosts(actor),
+          canDiscount: hasPermission(actor.permissions, "pos.discount") || hasPermission(actor.permissions, "pos.discount_override"),
+          canVoid: hasPermission(actor.permissions, "pos.void"),
+          canRefund: hasPermission(actor.permissions, "pos.refund"),
+        }
+      : {
+          maxDiscountPct: 100,
+          canEditPrice: true,
+          allowedMethods: [],
+          requireShift: false,
+          canViewCosts: true,
+          canDiscount: true,
+          canVoid: true,
+          canRefund: true,
+        },
     level: scope.level,
     organizationId: scope.organizationId,
     branchId: scope.branchId,

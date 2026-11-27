@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { apiContext, resolveWriteTarget, scopeWhere } from "@/lib/scope";
+import { apiContext, canViewCosts, resolveWriteTarget, scopeWhere } from "@/lib/scope";
+import { stripCostFields } from "@/lib/permissions";
 import { fail, handleError, isUuid, json, money, opt, optDate, optUuid, paging, parseBody, positive, req, round2 } from "@/lib/http";
 import { enrichMedicine, recordStockMovement, todayUtcDate } from "@/lib/pharmacy";
+import { invalidateStatsCache, memo } from "@/lib/memo";
 
 export async function GET(request) {
   try {
@@ -17,6 +19,66 @@ export async function GET(request) {
     const status = sp.get("status");
     const stockFilter = sp.get("stock");
     const posMode = sp.get("pos") === "1";
+    const catalogMode = sp.get("catalog") === "1";
+
+    if (catalogMode) {
+      const catalogKey = `pharmacy:catalog:${scope.organizationId || "all"}:${scope.branchId || "all"}`;
+      const payload = await memo(catalogKey, 15_000, async () => {
+        const todayUtc = todayUtcDate();
+        const meds = await prisma.medicine.findMany({
+          where: { ...scopeWhere(scope), status: "ACTIVE" },
+          orderBy: [{ name: "asc" }],
+          take: 5000,
+          select: {
+            id: true,
+            branchId: true,
+            name: true,
+            genericName: true,
+            strength: true,
+            dosageForm: true,
+            unit: true,
+            packSize: true,
+            barcode: true,
+            sku: true,
+            rackLocation: true,
+            lowStockAlert: true,
+            defaultPurchasePrice: true,
+            defaultSalePrice: true,
+            status: true,
+            updatedAt: true,
+            category: { select: { id: true, name: true } },
+            company: { select: { id: true, name: true } },
+            batches: {
+              where: { isActive: true, quantity: { gt: 0 } },
+              orderBy: [{ expiryDate: "asc" }, { createdAt: "asc" }],
+              select: {
+                id: true,
+                batchNumber: true,
+                expiryDate: true,
+                purchasePrice: true,
+                salePrice: true,
+                mrp: true,
+                quantity: true,
+                isActive: true,
+              },
+            },
+          },
+        });
+        const items = meds.map((m) => {
+          const e = enrichMedicine(m);
+          const validBatches = (m.batches || []).filter(
+            (b) => new Date(b.expiryDate) >= todayUtc && Number(b.quantity) > 0,
+          );
+          const expiredBatches = (m.batches || []).filter(
+            (b) => new Date(b.expiryDate) < todayUtc && Number(b.quantity) > 0,
+          );
+          return { ...e, validBatches, expiredBatches };
+        });
+        return { items, total: items.length, syncedAt: new Date().toISOString() };
+      });
+      const hideCost = !canViewCosts(auth.ctx.actor);
+      return json(hideCost ? { ...payload, items: (payload.items || []).map(stripCostFields) } : payload);
+    }
 
     const and = [scopeWhere(scope)];
     if (posMode || sp.get("active") === "1") and.push({ status: "ACTIVE" });
@@ -84,7 +146,8 @@ export async function GET(request) {
           const startsB = b.name.toLowerCase().startsWith(qLower) ? 0 : 1;
           return startsA - startsB || a.name.localeCompare(b.name);
         });
-      return json({ items, total: items.length });
+      const hideCost = !canViewCosts(auth.ctx.actor);
+      return json({ items: hideCost ? items.map(stripCostFields) : items, total: items.length });
     }
 
     const { page, pageSize, skip, take } = paging(sp, 20);
@@ -112,7 +175,8 @@ export async function GET(request) {
       : enriched;
 
     const total = stockFilter ? filtered.length : await prisma.medicine.count({ where });
-    const items = stockFilter ? filtered.slice(skip, skip + pageSize) : filtered;
+    const rawItems = stockFilter ? filtered.slice(skip, skip + pageSize) : filtered;
+    const items = canViewCosts(auth.ctx.actor) ? rawItems : rawItems.map(stripCostFields);
     return json({ items, total, page, pageSize });
   } catch (error) {
     return handleError(error, "Medicines list");
@@ -247,6 +311,7 @@ export async function POST(request) {
       return med;
     });
 
+    invalidateStatsCache();
     return json({ id: created.id, message: "Medicine created." }, 201);
   } catch (error) {
     return handleError(error, "Medicine create");

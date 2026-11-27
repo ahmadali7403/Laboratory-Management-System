@@ -88,7 +88,7 @@ export async function getAdminSession() {
     const admin = await withRetry(() =>
       prisma.platformAdmin.findUnique({
         where: { id: payload.adminId },
-        select: { id: true, name: true, email: true, role: true, isActive: true },
+        select: { id: true, name: true, email: true, role: true, isActive: true, mustChangePassword: true },
       }),
     );
     if (!admin || !admin.isActive || admin.role !== "SUPER_ADMIN") return null;
@@ -151,6 +151,7 @@ export async function getUserSession() {
           name: true,
           username: true,
           organizationId: true,
+          mustChangePassword: true,
           status: true,
           organization: { select: { status: true } },
           memberships: {
@@ -191,6 +192,7 @@ export async function getUserSession() {
       organizationId: user.organizationId,
       branchId: payload.branchId || null,
       role: payload.role,
+      mustChangePassword: Boolean(user.mustChangePassword),
     };
   });
 }
@@ -233,7 +235,7 @@ export async function refreshSession() {
     if (!valid) return false;
     const age = Math.floor(Date.now() / 1000) - (payload.iat || 0);
     if (age > REFRESH_AFTER_SECONDS) {
-      const { exp, iat, ...claims } = payload; // eslint-disable-line no-unused-vars
+      const { exp, iat, ...claims } = payload;
       const fresh = await new SignJWT(claims)
         .setProtectedHeader({ alg: "HS256" })
         .setIssuedAt()

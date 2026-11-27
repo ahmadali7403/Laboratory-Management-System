@@ -236,6 +236,7 @@ export async function PATCH(request) {
           username,
           email,
           password,
+          ...(newPassword ? { mustChangePassword: false } : {}),
         },
       });
 
@@ -318,6 +319,7 @@ export async function PATCH(request) {
         username,
         email,
         password,
+        ...(newPassword ? { mustChangePassword: false } : {}),
       },
     });
 

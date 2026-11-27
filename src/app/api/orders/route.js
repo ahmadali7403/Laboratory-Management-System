@@ -1,10 +1,12 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { apiContext, resolveWriteTarget, scopeWhere } from "@/lib/scope";
+import { apiContext, hasPermission, resolveWriteTarget, scopeWhere, verifyManagerOverride } from "@/lib/scope";
+import { clientIp, logAudit } from "@/lib/audit";
 import { fail, handleError, json, money, opt, optUuid, paging, parseBody, req, round2, uuid } from "@/lib/http";
 import { nextNumber } from "@/lib/sequence";
 import { notify } from "@/lib/notify";
 import { paymentStatusFor } from "@/lib/lab";
+import { invalidateStatsCache } from "@/lib/memo";
 import { NAME_MESSAGE, NAME_RE, phoneField } from "@/lib/validators";
 
 const STATUSES = ["REGISTERED", "SAMPLE_COLLECTED", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
@@ -69,11 +71,12 @@ const createSchema = z.object({
     .optional(),
   testIds: z.array(uuid).min(1, "Select at least one test.").max(100),
   discount: money.default(0),
+  overridePin: z.string().trim().max(10).optional(),
   notes: opt(500),
   payment: z
     .object({
       amount: money,
-      method: z.enum(["CASH", "CARD", "BANK_TRANSFER", "ONLINE"]).default("CASH"),
+      method: z.enum(["CASH", "CARD", "JAZZCASH", "EASYPAISA", "BANK_TRANSFER", "ONLINE"]).default("CASH"),
       reference: opt(100),
     })
     .optional(),
@@ -115,6 +118,35 @@ export async function POST(request) {
     const subtotal = round2(tests.reduce((sum, t) => sum + Number(t.price), 0));
     const discount = round2(data.discount);
     if (discount > subtotal) return fail("Discount cannot exceed the order subtotal.", 400);
+
+    const actor = auth.ctx.actor;
+    const limits = actor.roleMeta;
+    if (actor.role === "STAFF" && data.payment && limits?.allowedMethods?.length && !limits.allowedMethods.includes(data.payment.method)) {
+      return fail(`Payment method ${data.payment.method} is not allowed for your role.`, 403);
+    }
+    const discountPct = subtotal > 0 ? round2((discount / subtotal) * 100) : 0;
+    let overrideApprover = null;
+    if (actor.role === "STAFF" && discount > 0) {
+      const canDisc = hasPermission(actor.permissions, "pos.discount") || hasPermission(actor.permissions, "pos.discount_override");
+      const maxPct = Number(limits?.maxDiscountPct ?? 100);
+      if (!canDisc || discountPct > maxPct + 0.01) {
+        overrideApprover = await verifyManagerOverride(prisma, {
+          organizationId,
+          branchId,
+          pin: data.overridePin,
+          requiredPerm: "pos.discount_override",
+        });
+        if (!overrideApprover) {
+          return fail(
+            !canDisc
+              ? "Your role cannot apply discounts. Manager override PIN required."
+              : `Discount (${discountPct}%) exceeds your role limit (${maxPct}%). Manager override PIN required.`,
+            403,
+          );
+        }
+      }
+    }
+
     const total = round2(subtotal - discount);
     const initialPayment = data.payment ? round2(data.payment.amount) : 0;
     if (initialPayment > total) return fail("Payment cannot exceed the order total.", 400);
@@ -202,6 +234,22 @@ export async function POST(request) {
           });
         }
 
+        if (overrideApprover) {
+          await logAudit({
+            tx,
+            organizationId,
+            branchId,
+            userId: actor.id,
+            actorName: actor.name,
+            actorRole: actor.role,
+            action: "DISCOUNT_OVERRIDE",
+            resource: "LAB_ORDER",
+            resourceId: created.id,
+            summary: `${orderNo} discount approved by ${overrideApprover.name} (${discountPct}%)`,
+            ip: clientIp(request),
+          });
+        }
+
         await notify(tx, {
           organizationId,
           branchId,
@@ -215,6 +263,7 @@ export async function POST(request) {
       { maxWait: 10000, timeout: 30000 },
     );
 
+    invalidateStatsCache();
     return json({ id: order.id, orderNo: order.orderNo, message: "Order created." }, 201);
   } catch (error) {
     return handleError(error, "Order create");

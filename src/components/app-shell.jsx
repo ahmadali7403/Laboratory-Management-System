@@ -6,9 +6,13 @@ import QuickAdd from "@/components/quick-add";
 import Sidebar from "@/components/sidebar";
 import NotificationBell from "@/components/notification-bell";
 import SessionKeepAlive from "@/components/session-keepalive";
+import SessionLock from "@/components/session-lock";
 import ScopeSelector from "@/components/scope-selector";
+import AppMain from "@/components/app-main";
 import { UIProvider } from "@/components/ui";
 import { RecordViewProvider } from "@/components/record-view";
+import KeyboardNav from "@/components/keyboard-nav";
+import { flattenNavLinks } from "@/lib/shortcuts";
 import { memo } from "@/lib/memo";
 
 const ROLE_LABEL = {
@@ -52,6 +56,7 @@ export default async function AppShell({ children }) {
   ]);
 
   const nav = buildNav(ctx);
+  const hotkeyLinks = flattenNavLinks(nav);
 
   const viewing =
     scope.level === "PLATFORM"
@@ -64,8 +69,10 @@ export default async function AppShell({ children }) {
     <UIProvider>
       <RecordViewProvider>
       <SessionKeepAlive />
+      <SessionLock userName={actor.name} mustChangePassword={Boolean(actor.mustChangePassword)} />
+      <KeyboardNav navLinks={hotkeyLinks} />
 
-      <div className="flex h-screen min-w-0 max-w-full overflow-hidden bg-slate-100 print:block print:h-auto print:overflow-visible">
+      <div className="flex h-[100dvh] min-w-0 max-w-full overflow-hidden bg-slate-100 print:block print:h-auto print:overflow-visible">
         <Sidebar
           items={nav}
           unread={unread}
@@ -125,11 +132,7 @@ export default async function AppShell({ children }) {
             </div>
           </header>
 
-          <main className="min-h-0 min-w-0 flex-1 overflow-x-clip overflow-y-auto print:overflow-visible">
-            <div className="mx-auto w-full min-w-0 max-w-[1800px] p-2 sm:p-2.5 lg:p-3 print:max-w-none print:p-0">
-              {children}
-            </div>
-          </main>
+          <AppMain>{children}</AppMain>
         </div>
       </div>
       </RecordViewProvider>

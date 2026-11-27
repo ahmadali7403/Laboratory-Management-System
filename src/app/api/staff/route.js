@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { ADMIN_ROLE_NAMES, apiContext, resolveWriteTarget } from "@/lib/scope";
 import { fail, handleError, json, opt, optUuid, paging, parseBody, req, uuid } from "@/lib/http";
 import { usernameTaken } from "@/lib/usernames";
-import { passwordField, personName, phoneField, usernameField } from "@/lib/validators";
+import { passwordField, personName, phoneField, pinField, usernameField } from "@/lib/validators";
 
 const staffInclude = {
   userRoles: { select: { role: { select: { id: true, name: true } } } },
@@ -35,7 +35,7 @@ export async function GET(request) {
         orderBy: { createdAt: "desc" },
         skip,
         take,
-        select: { id: true, name: true, username: true, email: true, phone: true, status: true, createdAt: true, organization: { select: { name: true } }, ...staffInclude },
+        select: { id: true, name: true, username: true, email: true, phone: true, pinHash: true, status: true, createdAt: true, organization: { select: { name: true } }, ...staffInclude },
       }),
       prisma.user.count({ where }),
     ]);
@@ -45,6 +45,7 @@ export async function GET(request) {
       username: u.username,
       email: u.email.endsWith("@staff.labos.local") ? null : u.email,
       phone: u.phone,
+      hasPin: Boolean(u.pinHash),
       status: u.status,
       createdAt: u.createdAt,
       organization: u.organization.name,
@@ -65,6 +66,7 @@ const schema = z.object({
   roleId: uuid,
   username: usernameField,
   password: passwordField,
+  pin: pinField,
 });
 
 /**
@@ -86,6 +88,7 @@ export async function POST(request) {
 
     if (await usernameTaken(parsed.data.username)) return fail("This username is already taken. Choose another one.", 409);
     const passwordHash = await bcrypt.hash(parsed.data.password, 10);
+    const pinHash = parsed.data.pin ? await bcrypt.hash(parsed.data.pin, 10) : null;
     const email = parsed.data.email?.toLowerCase() || `${crypto.randomUUID()}@staff.labos.local`;
 
     const user = await prisma.$transaction(async (tx) => {
@@ -96,6 +99,7 @@ export async function POST(request) {
           phone: parsed.data.phone,
           username: parsed.data.username,
           password: passwordHash,
+          pinHash,
           organization: { connect: { id: organizationId } },
         },
         select: { id: true },

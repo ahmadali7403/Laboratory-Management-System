@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { apiContext, resolveWriteTarget, scopeWhere } from "@/lib/scope";
+import { apiContext, canViewCosts, hasPermission, resolveWriteTarget, scopeWhere, verifyManagerOverride } from "@/lib/scope";
+import { hasModule, stripCostFields } from "@/lib/permissions";
+import { clientIp, logAudit } from "@/lib/audit";
 import { fail, handleError, isUuid, json, money, opt, optUuid, paging, parseBody, positive, round2, uuid } from "@/lib/http";
 import { nextNumber } from "@/lib/sequence";
 import { paymentStatusFor } from "@/lib/lab";
 import { PHARMACY_METHOD_VALUES, recordStockMovement, todayUtcDate } from "@/lib/pharmacy";
+import { invalidateStatsCache } from "@/lib/memo";
 
 export async function GET(request) {
   try {
@@ -17,6 +20,10 @@ export async function GET(request) {
     const paymentStatus = sp.get("paymentStatus");
 
     const and = [scopeWhere(auth.ctx.scope)];
+    const actor = auth.ctx.actor;
+    if (actor.role === "STAFF" && !hasModule(actor.permissions, "pharmacy") && !hasModule(actor.permissions, "pharmacy_reports")) {
+      and.push({ soldByName: actor.name });
+    }
     if (["COMPLETED", "PARTIAL_RETURN", "RETURNED", "CANCELLED"].includes(status)) and.push({ status });
     if (["UNPAID", "PARTIAL", "PAID"].includes(paymentStatus)) and.push({ paymentStatus, status: { not: "CANCELLED" } });
     if (q) {
@@ -46,7 +53,8 @@ export async function GET(request) {
       }),
       prisma.pharmacySale.count({ where }),
     ]);
-    return json({ items, total, page, pageSize });
+    const hideCost = !canViewCosts(auth.ctx.actor);
+    return json({ items: hideCost ? items.map(stripCostFields) : items, total, page, pageSize });
   } catch (error) {
     return handleError(error, "Pharmacy sales list");
   }
@@ -68,6 +76,7 @@ const createSchema = z.object({
   paymentMethod: z.enum(PHARMACY_METHOD_VALUES).default("CASH"),
   reference: opt(100),
   notes: opt(500),
+  overridePin: z.string().trim().max(10).optional(),
   items: z.array(lineSchema).min(1, "Add at least one medicine to the cart.").max(100),
 });
 
@@ -82,6 +91,11 @@ export async function POST(request) {
     const resolved = await resolveWriteTarget(auth.ctx, data, { branchRequired: true });
     if (resolved.error) return resolved.error;
     const { organizationId, branchId } = resolved.target;
+    const actor = auth.ctx.actor;
+    const limits = actor.roleMeta;
+    if (actor.role === "STAFF" && limits?.allowedMethods?.length && !limits.allowedMethods.includes(data.paymentMethod)) {
+      return fail(`Payment method ${data.paymentMethod} is not allowed for your role.`, 403);
+    }
 
     // Combine duplicate batchId lines if any, or reject duplicates cleanly
     const batchIdList = data.items.map((i) => i.batchId);
@@ -160,6 +174,31 @@ export async function POST(request) {
         const overallDiscount = round2(data.discount);
         if (overallDiscount > afterItemDisc + 0.001) {
           return { error: fail("Overall discount cannot exceed subtotal after item discounts.", 400) };
+        }
+        const totalDiscount = round2(itemDiscountTotal + overallDiscount);
+        const discountPct = subtotal > 0 ? round2((totalDiscount / subtotal) * 100) : 0;
+        let overrideApprover = null;
+        if (actor.role === "STAFF" && totalDiscount > 0) {
+          const canDisc = hasPermission(actor.permissions, "pos.discount") || hasPermission(actor.permissions, "pos.discount_override");
+          const maxPct = Number(limits?.maxDiscountPct ?? 100);
+          if (!canDisc || discountPct > maxPct + 0.01) {
+            overrideApprover = await verifyManagerOverride(tx, {
+              organizationId,
+              branchId,
+              pin: data.overridePin,
+              requiredPerm: "pos.discount_override",
+            });
+            if (!overrideApprover) {
+              return {
+                error: fail(
+                  !canDisc
+                    ? "Your role cannot apply discounts. Manager override PIN required."
+                    : `Discount (${discountPct}%) exceeds your role limit (${maxPct}%). Manager override PIN required.`,
+                  403,
+                ),
+              };
+            }
+          }
         }
         const total = round2(afterItemDisc - overallDiscount);
         const tendered = data.paidAmount !== undefined ? round2(data.paidAmount) : total;
@@ -245,12 +284,29 @@ export async function POST(request) {
           });
         }
 
+        if (overrideApprover) {
+          await logAudit({
+            tx,
+            organizationId,
+            branchId,
+            userId: actor.id,
+            actorName: actor.name,
+            actorRole: actor.role,
+            action: "DISCOUNT_OVERRIDE",
+            resource: "PHARMACY_SALE",
+            resourceId: sale.id,
+            summary: `${saleNo} discount approved by ${overrideApprover.name} (${discountPct}%)`,
+            ip: clientIp(request),
+          });
+        }
+
         return { sale, changeAmount };
       },
       { maxWait: 10000, timeout: 30000 },
     );
 
     if (result.error) return result.error;
+    invalidateStatsCache();
     return json(
       {
         id: result.sale.id,

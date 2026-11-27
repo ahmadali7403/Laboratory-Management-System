@@ -18,6 +18,7 @@ export const suppliers = createCrud({
   label: "Supplier",
   dependents: ["purchases"],
   orgWide: true,
+  cacheTtlMs: 30_000,
   createSchema: schema,
   orderBy: [{ name: "asc" }],
   searchFields: ["name", "contactPerson", "phone"],

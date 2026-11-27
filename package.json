@@ -8,8 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "admin:create": "node scripts/create-super-admin.mjs",
+    "admin:seed": "node scripts/seed-super-admin.mjs",
     "db:seed:demo": "node scripts/seed-demo.mjs",
     "db:seed:tests": "node scripts/seed-common-tests.mjs",
+    "db:seed:medicines": "node scripts/seed-common-medicines.mjs",
     "db:seed:branch": "node scripts/seed-branch-data.mjs"
   },
   "dependencies": {

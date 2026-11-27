@@ -1,74 +1,117 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Layers, Plus, Search } from "lucide-react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Layers, Plus, Zap } from "lucide-react";
 import { api, formatDate, formatMoney } from "@/lib/client";
 import { Badge, Spinner, useDebounced } from "@/components/ui";
-
-const ic = "h-8 w-full rounded-md border border-slate-300 bg-white px-2.5 text-[13px] text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100";
+import VirtualRows from "@/components/virtual-rows";
+import SearchBar from "@/components/pos/SearchBar";
+import { createScannerDetector } from "@/lib/shortcuts";
+import { fetchMedicineCatalog, loadPosCatalog, searchMedicinesLocal } from "@/lib/pos-cache";
 
 export default function MedicineSearch({
   branchId,
   mode = "pos", // "pos" | "purchase"
   disabled = false,
   inputRef: externalRef,
-  onSelect, // (medicine, batchOrNull) => void
-  onPickBatch, // (medicine) => void (when user wants to pick from multiple batches)
+  onSelect, // (medicine, batchOrNull, meta) => void
+  onPickBatch, // (medicine) => void
   refreshKey = 0,
+  dark = false,
 }) {
   const internalRef = useRef(null);
   const searchRef = externalRef || internalRef;
-  const listRef = useRef(null);
+  const scannerRef = useRef(null);
   const [q, setQ] = useState("");
+  const deferredQ = useDeferredValue(q);
   const dq = useDebounced(q, 140);
-  const [state, setState] = useState({ key: "", items: [] });
+  const [categoryId, setCategoryId] = useState("");
+
+  const [catalogState, setCatalogState] = useState({ branchId: "", items: [], syncing: false });
+  const [purchaseState, setPurchaseState] = useState({ key: "", items: [] });
   const [hi, setHi] = useState(0);
+
   const reqKey = `${branchId}|${dq.trim()}|${mode}|${refreshKey}`;
-  const loading = Boolean(branchId) && state.key !== reqKey;
-  const items = branchId ? state.items : [];
 
   useEffect(() => {
-    if (!branchId) return;
+    if (!branchId || mode !== "pos") return;
     const ctrl = new AbortController();
-    const params = new URLSearchParams({ branchId });
-    if (mode === "pos") params.set("pos", "1");
-    else {
-      params.set("active", "1");
-      params.set("pageSize", "80");
-    }
+    loadPosCatalog("medicines", branchId, fetchMedicineCatalog, {
+      force: refreshKey > 0,
+      signal: ctrl.signal,
+      onUpdate: (items, meta) => {
+        if (!ctrl.signal.aborted) {
+          setCatalogState({ branchId, items, syncing: Boolean(meta?.syncing) });
+        }
+      },
+    });
+    return () => ctrl.abort();
+  }, [branchId, mode, refreshKey]);
+
+  useEffect(() => {
+    if (!branchId || mode === "pos") return;
+    const ctrl = new AbortController();
+    const params = new URLSearchParams({ branchId, active: "1", pageSize: "80" });
     if (dq.trim()) params.set("q", dq.trim());
 
     api(`/api/pharmacy/medicines?${params}`, { signal: ctrl.signal })
       .then((d) => {
-        setState({ key: reqKey, items: d.items || [] });
+        setPurchaseState({ key: reqKey, items: d.items || [] });
         setHi(0);
       })
       .catch((e) => {
-        if (e.name !== "AbortError") setState({ key: reqKey, items: [] });
+        if (e.name !== "AbortError") setPurchaseState({ key: reqKey, items: [] });
       });
 
     return () => ctrl.abort();
   }, [branchId, dq, mode, refreshKey, reqKey]);
 
-  useEffect(() => {
-    listRef.current?.querySelector(`[data-med-idx="${hi}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [hi, items.length]);
+  const categories = useMemo(() => {
+    if (mode !== "pos" || catalogState.branchId !== branchId) return [];
+    const seen = new Map();
+    for (const m of catalogState.items) {
+      if (m.category?.id && m.category?.name && !seen.has(m.category.id)) {
+        seen.set(m.category.id, m.category.name);
+      }
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [mode, branchId, catalogState]);
 
-  function choose(med) {
+  const quickMeds = useMemo(() => {
+    if (mode !== "pos" || catalogState.branchId !== branchId) return [];
+    return catalogState.items.filter((m) => (m.validBatches?.length || 0) > 0).slice(0, 6);
+  }, [mode, branchId, catalogState]);
+
+  const localItems = useMemo(() => {
+    if (mode !== "pos" || !branchId || catalogState.branchId !== branchId) return [];
+    return searchMedicinesLocal(catalogState.items, deferredQ, categoryId, 200);
+  }, [mode, branchId, catalogState, deferredQ, categoryId]);
+
+  const items = mode === "pos" ? localItems : (branchId ? purchaseState.items : []);
+  const loading = mode === "pos"
+    ? Boolean(branchId) && catalogState.branchId !== branchId && catalogState.items.length === 0
+    : Boolean(branchId) && purchaseState.key !== reqKey;
+  const safeHi = items.length ? Math.min(hi, items.length - 1) : 0;
+
+  function choose(med, meta = {}) {
     if (!med) return;
     if (mode === "pos") {
       const validBatches = med.validBatches || [];
       if (validBatches.length === 0) return;
-      onSelect(med, validBatches[0]); // FEFO: earliest non-expired batch with stock
+      onSelect(med, validBatches[0], meta);
     } else {
-      onSelect(med, null);
+      onSelect(med, null, meta);
     }
     setQ("");
     setHi(0);
-    setTimeout(() => searchRef.current?.focus(), 0);
+    if (meta.isScan || mode !== "pos") {
+      setTimeout(() => searchRef.current?.focus(), 0);
+    }
   }
 
   function handleKeyDown(e) {
+    if (!scannerRef.current) scannerRef.current = createScannerDetector();
+    scannerRef.current.recordKey(e.key);
     if (e.key === "ArrowDown") {
       e.preventDefault();
       setHi((i) => Math.min(Math.max(0, items.length - 1), i + 1));
@@ -78,9 +121,15 @@ export default function MedicineSearch({
     } else if (e.key === "Enter") {
       e.preventDefault();
       e.stopPropagation();
-      const target = items[hi] || items[0];
-      if (target) choose(target);
+      const isScanBurst = scannerRef.current.consumeScanEnter();
+      const trimmed = q.trim().toLowerCase();
+      const exactBarcode = trimmed
+        ? items.find((m) => (m.barcode || "").toLowerCase() === trimmed || (m.sku || "").toLowerCase() === trimmed)
+        : null;
+      const target = exactBarcode || items[safeHi] || items[0];
+      if (target) choose(target, { isScan: isScanBurst || Boolean(exactBarcode) });
     } else if (e.key === "Escape") {
+      scannerRef.current.reset();
       if (q) {
         e.preventDefault();
         e.stopPropagation();
@@ -91,162 +140,221 @@ export default function MedicineSearch({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative shrink-0">
-        <Search size={14} className="pointer-events-none absolute left-2.5 top-2.5 text-slate-400" />
-        <input
-          ref={searchRef}
-          autoFocus
-          value={q}
-          disabled={disabled || !branchId}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder={
-            mode === "pos"
-              ? "Search medicine, generic, or scan barcode — ↑↓ navigate, Enter adds FEFO batch"
-              : "Search medicine, generic, or barcode — Enter adds to purchase"
-          }
-          aria-label="Search medicine"
-          className={`${ic} pl-8 pr-16`}
-        />
-        {q && (
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+      <SearchBar
+        inputRef={searchRef}
+        value={q}
+        disabled={disabled || !branchId}
+        syncing={mode === "pos" && catalogState.syncing}
+        dark={dark}
+        countText={mode === "pos" && items.length > 0 ? `${items.length} matches` : ""}
+        ariaLabel="Search medicine"
+        onChange={(e) => { setQ(e.target.value); setHi(0); }}
+        onKeyDown={handleKeyDown}
+        onClear={() => { setQ(""); setHi(0); searchRef.current?.focus(); }}
+        placeholder={
+          mode === "pos"
+            ? "Search medicine, generic, strength, or scan barcode — ↑↓ navigate, Enter adds"
+            : "Search medicine, generic, or barcode — Enter adds to purchase"
+        }
+      />
+
+      {mode === "pos" && categories.length > 0 && (
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
           <button
             type="button"
-            onClick={() => { setQ(""); setHi(0); searchRef.current?.focus(); }}
-            className="absolute right-2 top-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 hover:bg-slate-100"
+            tabIndex={-1}
+            onClick={() => { setCategoryId(""); setHi(0); searchRef.current?.focus(); }}
+            className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+              !categoryId
+                ? "bg-blue-600 text-white"
+                : dark
+                  ? "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
           >
-            Esc
+            All ({catalogState.items.length})
           </button>
-        )}
-      </div>
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              tabIndex={-1}
+              onClick={() => { setCategoryId(categoryId === c.id ? "" : c.id); setHi(0); searchRef.current?.focus(); }}
+              className={`shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition ${
+                categoryId === c.id
+                  ? "bg-blue-600 text-white"
+                  : dark
+                    ? "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      )}
 
-      <div ref={listRef} className="mt-1.5 min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-white">
+      {mode === "pos" && !q.trim() && !categoryId && quickMeds.length > 0 && (
+        <div className="hidden shrink-0 grid-cols-3 gap-1.5 xl:grid">
+          {quickMeds.map((m) => {
+            const b = m.validBatches[0];
+            return (
+              <button
+                key={m.id}
+                type="button"
+                tabIndex={-1}
+                onClick={() => choose(m, { isScan: true })}
+                className="pos-surface-alt flex items-center justify-between gap-1.5 rounded-lg border px-2 py-1 text-left transition hover:border-blue-500"
+              >
+                <div className="min-w-0">
+                  <p className="flex items-center gap-1 truncate text-[11.5px] font-semibold">
+                    <Zap size={10} className="shrink-0 text-amber-500" />
+                    <span className="truncate">{m.name}</span>
+                  </p>
+                  <p className="truncate text-[10px]" style={{ color: "var(--pos-muted)" }}>
+                    {m.strength || m.genericName || "—"} · Stk {Number(m.validStock || 0)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-[11px] font-bold tabular-nums text-emerald-500">
+                  {formatMoney(b.salePrice)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div
+        className="pos-surface flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
+      >
         {!branchId ? (
-          <p className="p-4 text-center text-xs text-slate-400">Select a branch first.</p>
+          <p className="p-4 text-center text-xs" style={{ color: "var(--pos-muted)" }}>Select a branch first.</p>
         ) : loading && items.length === 0 ? (
           <div className="p-4"><Spinner /></div>
         ) : items.length === 0 ? (
-          <p className="p-4 text-center text-xs text-slate-400">No medicines match &ldquo;{q}&rdquo;.</p>
+          <p className="p-4 text-center text-xs" style={{ color: "var(--pos-muted)" }}>No medicines match &ldquo;{q}&rdquo;.</p>
         ) : (
-          <table className="w-full text-left text-[12.5px]">
-            <thead className="sticky top-0 z-10 bg-slate-50 text-[10px] font-bold uppercase tracking-wider text-slate-500 shadow-[0_1px_0_#e2e8f0]">
-              <tr>
-                <th className="px-2 py-1.5">Medicine / Generic</th>
-                {mode === "pos" ? (
-                  <>
-                    <th className="w-24 px-2 py-1.5">FEFO Batch</th>
-                    <th className="w-20 px-2 py-1.5 text-right">Stock</th>
-                    <th className="w-20 px-2 py-1.5 text-right">Price</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="w-24 px-2 py-1.5">Company</th>
-                    <th className="w-20 px-2 py-1.5 text-right">Stock</th>
-                    <th className="w-20 px-2 py-1.5 text-right">Cost</th>
-                  </>
-                )}
-                <th className="w-16 px-1.5 py-1.5 text-right">Add</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {items.map((m, idx) => {
+          <>
+            <div
+              className="pos-surface-alt grid shrink-0 grid-cols-[1fr_5.75rem_4.25rem_4.75rem_3.75rem] border-b px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: "var(--pos-muted)" }}
+            >
+              <span>Medicine / Generic</span>
+              <span>{mode === "pos" ? "FEFO Batch" : "Company"}</span>
+              <span className="text-right">Stock</span>
+              <span className="text-right">{mode === "pos" ? "Price" : "Cost"}</span>
+              <span className="text-right">Add</span>
+            </div>
+
+            <VirtualRows
+              items={items}
+              rowHeight={48}
+              scrollToIndex={safeHi}
+              renderRow={(m, idx) => {
                 const validBatches = m.validBatches || [];
                 const fefo = validBatches[0];
                 const expiredOnly = mode === "pos" && validBatches.length === 0 && (m.expiredBatches?.length || 0) > 0;
                 const unavailable = mode === "pos" && validBatches.length === 0;
-                const active = idx === hi;
+                const active = idx === safeHi;
 
                 return (
-                  <tr
-                    key={m.id}
+                  <div
+                    role="button"
+                    tabIndex={-1}
                     data-med-idx={idx}
                     onMouseEnter={() => setHi(idx)}
                     onClick={() => !unavailable && choose(m)}
-                    className={`transition-colors ${
+                    style={{
+                      borderColor: "var(--pos-border)",
+                      backgroundColor: unavailable
+                        ? active ? "rgba(244,63,94,0.12)" : undefined
+                        : active ? "var(--pos-row-active)" : undefined,
+                    }}
+                    className={`grid h-12 grid-cols-[1fr_5.75rem_4.25rem_4.75rem_3.75rem] items-center border-b px-2.5 text-[12px] transition-colors ${
                       unavailable
-                        ? active
-                          ? "cursor-not-allowed bg-rose-50/80 ring-1 ring-inset ring-rose-300"
-                          : "cursor-not-allowed bg-slate-50/60 opacity-70"
+                        ? "cursor-not-allowed opacity-60"
                         : active
-                          ? "cursor-pointer bg-blue-100/90 ring-2 ring-inset ring-blue-500"
-                          : "cursor-pointer hover:bg-blue-50/60"
+                          ? "cursor-pointer ring-2 ring-inset ring-blue-500"
+                          : "cursor-pointer hover:bg-blue-500/5"
                     }`}
                   >
-                    <td className="px-2 py-1.5 align-top">
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className="font-semibold text-slate-900">{m.name}</span>
-                        {m.strength && <span className="text-[11px] font-medium text-slate-600">{m.strength}</span>}
-                        {m.dosageForm && <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">{m.dosageForm}</span>}
+                    <div className="min-w-0 pr-1.5">
+                      <div className="flex items-center gap-1 truncate">
+                        <span className="truncate font-semibold">{m.name}</span>
+                        {m.strength && <span className="shrink-0 text-[10.5px]" style={{ color: "var(--pos-muted)" }}>{m.strength}</span>}
+                        {m.dosageForm && (
+                          <span
+                            className="shrink-0 rounded px-1 text-[9.5px]"
+                            style={{ backgroundColor: "var(--pos-chip-bg)", color: "var(--pos-chip-text)" }}
+                          >
+                            {m.dosageForm}
+                          </span>
+                        )}
                       </div>
-                      <p className="truncate text-[11px] text-slate-500">
+                      <p className="truncate text-[10.5px]" style={{ color: "var(--pos-muted)" }}>
                         {m.genericName || "—"}
                         {m.company?.name ? ` · ${m.company.name}` : ""}
                         {m.barcode ? ` · #${m.barcode}` : ""}
                       </p>
-                    </td>
-                    {mode === "pos" ? (
-                      <>
-                        <td className="px-2 py-1.5 align-top">
-                          {fefo ? (
-                            <div>
-                              <span className="font-mono text-[11px] font-semibold text-slate-700">{fefo.batchNumber}</span>
-                              <span className="block text-[10px] text-slate-500">{formatDate(fefo.expiryDate)}</span>
-                            </div>
-                          ) : expiredOnly ? (
-                            <Badge tone="red"><AlertTriangle size={10} className="mr-0.5" /> Expired</Badge>
-                          ) : (
-                            <Badge tone="gray">No stock</Badge>
-                          )}
-                        </td>
-                        <td className="px-2 py-1.5 text-right align-top font-semibold tabular-nums">
-                          <span className={m.validStock <= 0 ? "text-rose-600" : m.stockStatus === "LOW" ? "text-amber-600" : "text-emerald-700"}>
-                            {Number(m.validStock || 0)}
-                          </span>
-                          <span className="block text-[10px] font-normal text-slate-400">{m.unit}</span>
-                        </td>
-                        <td className="px-2 py-1.5 text-right align-top font-semibold tabular-nums text-slate-800">
-                          {fefo ? formatMoney(fefo.salePrice) : formatMoney(m.defaultSalePrice)}
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="px-2 py-1.5 align-top text-[11px] text-slate-500">{m.company?.name || "—"}</td>
-                        <td className="px-2 py-1.5 text-right align-top font-semibold tabular-nums text-slate-700">
-                          {Number(m.validStock || 0)} <span className="text-[10px] font-normal text-slate-400">{m.unit}</span>
-                        </td>
-                        <td className="px-2 py-1.5 text-right align-top font-semibold tabular-nums text-slate-800">
-                          {formatMoney(m.defaultPurchasePrice)}
-                        </td>
-                      </>
-                    )}
-                    <td className="px-1.5 py-1.5 text-right align-top" onClick={(e) => e.stopPropagation()}>
-                      <div className="inline-flex items-center gap-1">
-                        {mode === "pos" && validBatches.length > 1 && onPickBatch && (
-                          <button
-                            type="button"
-                            onClick={() => onPickBatch(m)}
-                            title={`${validBatches.length} batches available`}
-                            className="inline-flex h-6 items-center gap-0.5 rounded border border-slate-200 bg-white px-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
-                          >
-                            <Layers size={11} /> {validBatches.length}
-                          </button>
-                        )}
+                    </div>
+
+                    <div className="min-w-0 pr-1">
+                      {mode === "pos" ? (
+                        fefo ? (
+                          <div>
+                            <span className="block truncate font-mono text-[10.5px] font-semibold">{fefo.batchNumber}</span>
+                            <span className="block text-[9.5px]" style={{ color: "var(--pos-muted)" }}>{formatDate(fefo.expiryDate)}</span>
+                          </div>
+                        ) : expiredOnly ? (
+                          <Badge tone="red"><AlertTriangle size={10} className="mr-0.5" /> Exp</Badge>
+                        ) : (
+                          <Badge tone="gray">Out</Badge>
+                        )
+                      ) : (
+                        <span className="block truncate text-[11px]" style={{ color: "var(--pos-muted)" }}>{m.company?.name || "—"}</span>
+                      )}
+                    </div>
+
+                    <div className="text-right font-semibold tabular-nums">
+                      <span className={m.validStock <= 0 ? "text-rose-500" : m.stockStatus === "LOW" ? "text-amber-500" : "text-emerald-500"}>
+                        {Number(m.validStock || 0)}
+                      </span>
+                      <span className="block text-[9.5px] font-normal" style={{ color: "var(--pos-muted)" }}>{m.unit}</span>
+                    </div>
+
+                    <div className="text-right font-semibold tabular-nums">
+                      {mode === "pos"
+                        ? (fefo ? formatMoney(fefo.salePrice) : formatMoney(m.defaultSalePrice))
+                        : formatMoney(m.defaultPurchasePrice)}
+                    </div>
+
+                    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                      {mode === "pos" && validBatches.length > 1 && onPickBatch && (
                         <button
                           type="button"
-                          disabled={unavailable}
-                          onClick={() => choose(m)}
-                          aria-label={`Add ${m.name}`}
-                          className="inline-flex h-6 w-6 items-center justify-center rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400"
+                          onClick={() => onPickBatch(m)}
+                          title={`${validBatches.length} batches available`}
+                          className="pos-surface-alt inline-flex h-6 items-center gap-0.5 rounded border px-1 text-[10px] font-semibold hover:opacity-80"
                         >
-                          <Plus size={13} />
+                          <Layers size={10} />{validBatches.length}
                         </button>
-                      </div>
-                    </td>
-                  </tr>
+                      )}
+                      <button
+                        type="button"
+                        disabled={unavailable}
+                        onClick={() => choose(m)}
+                        aria-label={`Add ${m.name}`}
+                        className="inline-flex h-6 w-6 items-center justify-center rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40"
+                      >
+                        <Plus size={13} />
+                      </button>
+                    </div>
+                  </div>
                 );
-              })}
-            </tbody>
-          </table>
+              }}
+            />
+          </>
         )}
       </div>
     </div>

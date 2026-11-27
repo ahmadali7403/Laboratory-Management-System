@@ -4,6 +4,7 @@ import {
   Children,
   createContext,
   isValidElement,
+  memo,
   useCallback,
   useContext,
   useEffect,
@@ -373,7 +374,7 @@ export function pageList(page, pages) {
   return res;
 }
 
-export function Pagination({ page, pageSize, total, onChange }) {
+export const Pagination = memo(function Pagination({ page, pageSize, total, onChange }) {
   if (!total) return null;
   const pages = Math.max(1, Math.ceil(total / pageSize));
   const from = (page - 1) * pageSize + 1;
@@ -403,7 +404,7 @@ export function Pagination({ page, pageSize, total, onChange }) {
       )}
     </div>
   );
-}
+});
 
 // ---------------------------------------------------------------------------
 // Select: drop-in replacement for <select> with a search box.
@@ -617,6 +618,29 @@ export function Modal({
       if (e.key === "Escape") {
         e.stopPropagation();
         onClose?.();
+        return;
+      }
+      if (e.key === "Tab" && dialogRef.current) {
+        const focusables = Array.from(
+          dialogRef.current.querySelectorAll(
+            'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => el.offsetParent !== null);
+        if (!focusables.length) {
+          e.preventDefault();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first || !dialogRef.current.contains(document.activeElement)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else if (document.activeElement === last || !dialogRef.current.contains(document.activeElement)) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
     document.addEventListener("keydown", onKey);

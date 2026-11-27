@@ -24,7 +24,7 @@ import {
   OrganizationGrowthChart,
   BranchComparisonChart,
   OrganizationStatusChart,
-} from "@/components/dashboard-charts";
+} from "@/components/dashboard-charts-lazy";
 
 export function Section({ title, children, action }) {
   return (
@@ -233,7 +233,7 @@ export function DashboardCharts({ data }) {
               Laboratory Activity
             </h3>
             <p className="mt-2 text-sm text-slate-500">
-              Daily and monthly charts show your branch's laboratory
+              Daily and monthly charts show your branch&apos;s laboratory
               performance.
             </p>
           </div>

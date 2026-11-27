@@ -4,11 +4,17 @@ import { ADMIN_ROLE_NAMES, apiContext, authorityWhere } from "@/lib/scope";
 import { ensurePermissions, grantableKeys } from "@/lib/permissions";
 import { assertRoleNameFree } from "@/lib/roles";
 import { fail, handleError, isUuid, json, opt, parseBody, req } from "@/lib/http";
+import { memoDelete } from "@/lib/memo";
+import { clientIp, logAudit } from "@/lib/audit";
 
 const schema = z.object({
   name: req(2, 60, "Role name").regex(/^[A-Za-z0-9 _-]+$/, "Role name may contain letters, numbers, spaces, hyphen and underscore only.").optional(),
   description: opt(200),
-  permissions: z.array(z.string().max(60)).max(100).optional(),
+  permissions: z.array(z.string().max(60)).max(120).optional(),
+  maxDiscountPct: z.coerce.number().min(0).max(100).optional(),
+  canEditPrice: z.boolean().optional(),
+  allowedMethods: z.array(z.string().max(30)).max(10).optional(),
+  requireShift: z.boolean().optional(),
 });
 
 async function findRole(actor, id) {
@@ -46,6 +52,10 @@ export async function GET(request, { params }) {
     return json({
       id: r.id, name: r.name, description: r.description, isSystem: system, branchId: r.branchId, branchName: r.branch?.name || null,
       editable: !system && (actor.role !== "BRANCH_ADMIN" || r.branchId === actor.branchId),
+      maxDiscountPct: Number(r.maxDiscountPct ?? 100),
+      canEditPrice: r.canEditPrice !== false,
+      allowedMethods: r.allowedMethods || [],
+      requireShift: Boolean(r.requireShift),
       permissions: r.permissions.map((p) => p.permission.key),
       staff: actor.role === "BRANCH_ADMIN" && r.branchId === null ? [] : r.userRoles.map((u) => u.user),
     });
@@ -78,6 +88,19 @@ export async function PATCH(request, { params }) {
         await tx.rolePermission.deleteMany({ where: { roleId: id } });
         await tx.rolePermission.createMany({ data: perms.map((p) => ({ roleId: id, permissionId: p.id })) });
       }
+    });
+    memoDelete("perms:");
+    await logAudit({
+      organizationId: role.organizationId,
+      branchId: role.branchId,
+      userId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: "ROLE_UPDATED",
+      resource: "ROLE",
+      resourceId: role.id,
+      summary: `${actor.name} updated role ${rest.name || role.name}`,
+      ip: clientIp(request),
     });
     return json({ message: "Role updated." });
   } catch (error) {

@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Ban, CreditCard, Plus, Printer, Search, Trash2 } from "lucide-react";
 import { api, formatDateTime, formatMoney, toInputDate } from "@/lib/client";
 import { Badge, Button, Field, FormError, Modal, Select, Spinner, StatusBadge, inputClass, useConfirm, useDebounced, useToast } from "@/components/ui";
+import { advanceFocusOnEnter } from "@/lib/shortcuts";
 
 const METHODS = [["CASH", "Cash"], ["CARD", "Card"], ["BANK_TRANSFER", "Bank transfer"], ["ONLINE", "Online"]];
 
@@ -87,7 +88,19 @@ export function NewOrderDialog({ scope, onClose, onSaved, initialWalk = false })
   return (
     <Modal open size="lg" title="New laboratory order" onClose={saving ? undefined : onClose}
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="order-form" loading={saving}>Create order · {formatMoney(total)}</Button></>}>
-      <form id="order-form" onSubmit={submit} className="grid gap-5 lg:grid-cols-2">
+      <form
+        id="order-form"
+        onSubmit={submit}
+        onKeyDown={(e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.requestSubmit();
+            return;
+          }
+          if (e.key === "Enter" && advanceFocusOnEnter(e, e.currentTarget)) return;
+        }}
+        className="grid gap-5 lg:grid-cols-2"
+      >
         <div className="space-y-4">
           <FormError message={error} />
           {eb.needsPick && <BranchPicker scope={scope} picked={eb.picked} onChange={(v) => { eb.setPicked(v); setPatientId(""); setPickedPatient(null); setSelected({}); }} />}
@@ -170,7 +183,19 @@ export function PaymentDialog({ order, onClose, onSaved }) {
   return (
     <Modal open size="sm" title={`Record payment · ${order.orderNo}`} subtitle={`Outstanding balance ${formatMoney(balance)}`} onClose={saving ? undefined : onClose}
       footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="pay-form" loading={saving}>Record payment</Button></>}>
-      <form id="pay-form" onSubmit={submit} className="space-y-4">
+      <form
+        id="pay-form"
+        onSubmit={submit}
+        onKeyDown={(e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.requestSubmit();
+            return;
+          }
+          advanceFocusOnEnter(e, e.currentTarget);
+        }}
+        className="space-y-4"
+      >
         <FormError message={error} />
         <Field label="Amount (Rs)" required><input type="number" required min="0.01" max={balance} step="any" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputClass} /></Field>
         <Field label="Method"><Select value={method} onChange={(e) => setMethod(e.target.value)} className={inputClass}>{METHODS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></Field>
@@ -191,6 +216,19 @@ export function OrderDetailDialog({ orderId, onClose, onChanged }) {
 
   const load = () => api(`/api/orders/${orderId}`).then(setOrder).catch((e) => setError(e.message));
   useEffect(() => { load(); }, [orderId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!order) return;
+    const onKey = (e) => {
+      if (e.key === "F9" || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p")) {
+        e.preventDefault();
+        if (order.status === "COMPLETED") window.location.assign(`/reports/${order.id}`);
+        else if (order.status !== "CANCELLED") window.location.assign(`/billing/${order.id}`);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [order]);
 
   async function cancel() {
     const ok = await confirm({ title: "Cancel order", message: `Cancel order ${order.orderNo}? This cannot be undone.`, confirmLabel: "Cancel order", danger: true });
@@ -235,6 +273,7 @@ export function OrderDetailDialog({ orderId, onClose, onChanged }) {
 export function ResultDialog({ item, onClose, onSaved }) {
   const toast = useToast();
   const panel = item.results?.length > 0;
+  const formRef = useRef(null);
   const [value, setValue] = useState(item.resultValue || "");
   const [unit, setUnit] = useState(item.unit || item.test?.unit || "");
   const [flag, setFlag] = useState(item.flag || "NORMAL");
@@ -245,6 +284,36 @@ export function ResultDialog({ item, onClose, onSaved }) {
   const range = item.test?.refRangeText || (item.test?.refLow != null || item.test?.refHigh != null ? `${item.test.refLow ?? ""} - ${item.test.refHigh ?? ""}` : "Not defined");
   const rangeOf = (r) => r.refRangeText || (r.refLow != null && r.refHigh != null ? `${r.refLow} - ${r.refHigh}` : r.refLow != null ? `≥ ${r.refLow}` : r.refHigh != null ? `≤ ${r.refHigh}` : "");
   const setRow = (i, k, v) => setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+
+  function onResultKeyDown(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      formRef.current?.requestSubmit();
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey) {
+      if (panel && e.target?.dataset?.resultInput === "true") {
+        const inputs = Array.from(formRef.current?.querySelectorAll('input[data-result-input="true"]:not([disabled])') || []);
+        const idx = inputs.indexOf(e.target);
+        if (idx >= 0 && idx < inputs.length - 1) {
+          e.preventDefault();
+          inputs[idx + 1].focus();
+          inputs[idx + 1].select?.();
+          return;
+        }
+        // Final parameter field: Enter submits cleanly
+        e.preventDefault();
+        formRef.current?.requestSubmit();
+        return;
+      }
+      if (!panel && e.target?.tagName === "INPUT") {
+        if (!advanceFocusOnEnter(e, formRef.current, 'input[data-result-field="true"]:not([disabled])')) {
+          e.preventDefault();
+          formRef.current?.requestSubmit();
+        }
+      }
+    }
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -260,13 +329,13 @@ export function ResultDialog({ item, onClose, onSaved }) {
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
   return (
-    <Modal open size={panel ? "lg" : "md"} title={`Enter result · ${item.testName}`} subtitle={`${item.order.patient.name} · ${item.order.orderNo}`} onClose={saving ? undefined : onClose}
-      footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="result-form" loading={saving}>Save result</Button></>}>
-      <form id="result-form" onSubmit={submit} className="space-y-4">
+    <Modal open size={panel ? "lg" : "md"} title={`Enter result · ${item.testName}`} subtitle={`${item.order.patient.name} · ${item.order.orderNo} · Press Enter for next field`} onClose={saving ? undefined : onClose}
+      footer={<><Button variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button><Button type="submit" form="result-form" loading={saving}>Save result (Ctrl+Enter)</Button></>}>
+      <form ref={formRef} id="result-form" onSubmit={submit} onKeyDown={onResultKeyDown} className="space-y-4">
         <FormError message={error} />
         {panel ? (
           <>
-            <p className="text-xs text-slate-500">Enter every value. Numeric values are flagged High/Low automatically from the reference range; use the Flag column only to override.</p>
+            <p className="text-xs text-slate-500">Enter every value (press <kbd className="rounded border border-slate-200 bg-slate-100 px-1 font-mono text-[10px]">Enter</kbd> to step to next parameter, or on the last row to save). Numeric values are flagged High/Low automatically.</p>
             <div className="overflow-x-auto rounded-xl border border-slate-200">
               <table className="w-full min-w-[560px] text-sm">
                 <thead className="bg-slate-50 text-[11px] uppercase text-slate-500"><tr><th className="px-3 py-2 text-left">Parameter</th><th className="px-3 py-2 text-left">Reference</th><th className="px-3 py-2 text-left">Unit</th><th className="w-40 px-3 py-2 text-left">Result</th><th className="w-32 px-3 py-2 text-left">Flag</th></tr></thead>
@@ -276,7 +345,7 @@ export function ResultDialog({ item, onClose, onSaved }) {
                       <td className="px-3 py-1.5 font-medium text-slate-800">{r.name}</td>
                       <td className="px-3 py-1.5 text-slate-600">{rangeOf(r) || "—"}</td>
                       <td className="px-3 py-1.5 text-slate-500">{r.unit || ""}</td>
-                      <td className="px-3 py-1.5"><input required value={rows[i].value} maxLength={300} onChange={(e) => setRow(i, "value", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} result`} autoFocus={i === 0} /></td>
+                      <td className="px-3 py-1.5"><input required data-result-input="true" value={rows[i].value} maxLength={300} onChange={(e) => setRow(i, "value", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} result`} autoFocus={i === 0} /></td>
                       <td className="px-3 py-1.5"><Select value={rows[i].flag} onChange={(e) => setRow(i, "flag", e.target.value)} className={`${inputClass} h-9`} aria-label={`${r.name} flag`}><option value="">Auto</option>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</Select></td>
                     </tr>
                   ))}
@@ -288,8 +357,8 @@ export function ResultDialog({ item, onClose, onSaved }) {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:col-span-2">Reference range: <b>{range}</b> {item.test?.unit || ""}</p>
-            <Field label="Result" required className="sm:col-span-2"><input required autoFocus value={value} maxLength={500} onChange={(e) => setValue(e.target.value)} className={inputClass} /></Field>
-            <Field label="Unit"><input value={unit} maxLength={30} onChange={(e) => setUnit(e.target.value)} className={inputClass} /></Field>
+            <Field label="Result" required className="sm:col-span-2"><input required autoFocus data-result-field="true" value={value} maxLength={500} onChange={(e) => setValue(e.target.value)} className={inputClass} /></Field>
+            <Field label="Unit"><input data-result-field="true" value={unit} maxLength={30} onChange={(e) => setUnit(e.target.value)} className={inputClass} /></Field>
             <Field label="Flag" hint="Numeric results are flagged automatically from the reference range."><Select value={flag} onChange={(e) => setFlag(e.target.value)} className={inputClass}>{["NORMAL", "LOW", "HIGH", "CRITICAL", "ABNORMAL"].map((f) => <option key={f}>{f}</option>)}</Select></Field>
             <Field label="Comments" className="sm:col-span-2"><textarea value={comments} maxLength={500} rows={2} onChange={(e) => setComments(e.target.value)} className={`${inputClass} h-auto py-2`} /></Field>
           </div>

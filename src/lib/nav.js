@@ -90,6 +90,7 @@ export function buildNav({ actor, scope }) {
   const roles = G("Roles", "ShieldCheck", [L("/roles?new=1", "Add New Role"), L("/roles", "Role List", null, { exact: true })]);
   const tail = [
     L("/analytics", "Reports & Analytics", "BarChart3"),
+    L("/audit-logs", "Audit Logs", "ShieldCheck"),
     L("/notifications", "Alerts", "Bell"),
     L("/backup", "Backup", "DatabaseBackup"),
   ];
